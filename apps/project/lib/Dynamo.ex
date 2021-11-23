@@ -42,42 +42,125 @@ defmodule Dynamo do
     }
   end
 
-  # Enqueue an item, this **modifies** the state
-  # machine, and should only be called when a log
-  # entry is committed.
-  
-  def insert_in_store(state,key,value) do
-    %{state | store: Map.put(state.store,key,{value})}
-  end
-
-  # Dequeue an item, modifying the state machine.
-  # This function should only be called once a
-  # log entry has been committed.
- 
-  def get_from_store(state,key) do
-    {ret} = Map.get(state.store,key)
-    {ret}
+  # Combine a single component in a vector clock.
+  @spec combine_component(
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: non_neg_integer()
+  defp combine_component(current, received) do
+    if current > received do
+      current 
+    else 
+      received
+    end
   end
 
   @doc """
-  Commit a log entry, advancing the state machine. This
-  function returns a tuple:
-  * The first element is {requester, return value}. Your
-    implementation should ensure that the leader who committed
-    the log entry sends the return value to the requester.
-  * The second element is the updated state.
+  Combine vector clocks: this is called whenever a
+  message is received, and should return the clock
+  from combining the two.
   """
-  
+  @spec combine_vector_clocks(map(), map()) :: map()
+  def combine_vector_clocks(current, received) do
+    # Map.merge just calls the function for any two components that
+    # appear in both maps. Anything occuring in only one of the two
+    # maps is just copied over. You should convince yourself that this
+    # is the correct thing to do here.
+    Map.merge(current, received, fn _k, c, r -> combine_component(c, r) end)
+  end
+
+  @doc """
+  This function is called by the process `proc` whenever an
+  event occurs, which for our purposes means whenever a message
+  is received or sent.
+  """
+  @spec update_vector_clock(atom(), map()) :: map()
+  def update_vector_clock(proc, clock) do
+    Map.update!(clock, proc, fn existing_value -> existing_value + 1 end)
+  end
+
+  # Produce a new vector clock that is a copy of v1,
+  # except for any keys (processes) that appear only
+  # in v2, which we add with a 0 value. This function
+  # is useful in making it so all process IDs do not
+  # need to be known a-priori. YOU DO NOT NEED TO DIG
+  # INTO THIS CODE, nor understand it.
+  @spec make_vectors_equal_length(map(), map()) :: map()
+  defp make_vectors_equal_length(v1, v2) do
+    v1_add = for {k, _} <- v2, !Map.has_key?(v1, k), do: {k, 0}
+    Map.merge(v1, Enum.into(v1_add, %{}))
+  end
+
+  # Compare two components of a vector clock c1 and c2.
+  # Return @before if a vector of the form [c1] happens before [c2].
+  # Return @after if a vector of the form [c2] happens before [c1].
+  # Return @concurrent if neither of the above two are true.
+  @spec compare_component(
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: :before | :after | :concurrent
+  def compare_component(c1, c2) do
+    cond do
+      c1 < c2 -> :before
+      c1 > c2 -> :after
+      c1 = c2 -> :concurrent
+    end
+  end
+
+  @doc """
+  Compare two vector clocks v1 and v2.
+  Returns @before if v1 happened before v2.
+  Returns @hafter if v2 happened before v1.
+  Returns @concurrent if neither of the above hold.
+  """
+  @spec compare_vectors(map(), map()) :: :before | :after | :concurrent
+  def compare_vectors(v1, v2) do
+    # First make the vectors equal length.
+    v1 = make_vectors_equal_length(v1, v2)
+    v2 = make_vectors_equal_length(v2, v1)
+    # `compare_result` is a list of elements from
+    # calling `compare_component` on each component of
+    # `v1` and `v2`. Given this list you need to figure
+    # out whether
+    compare_result =
+      Map.values(
+        Map.merge(v1, v2, fn _k, c1, c2 -> compare_component(c1, c2) end)
+      )
+    a = Enum.all?(compare_result, fn x -> x == :before or x == :concurrent end)
+    b = Enum.any?(compare_result, fn x -> x == :before end)
+    c = Enum.all?(compare_result, fn x -> x == :after or x == :concurrent end)
+    d = Enum.any?(compare_result, fn x -> x == :after end)
+    e = Enum.all?(compare_result, fn x -> x == :concurrent end)
+    cond do 
+      a and b -> :before
+      c and d -> :after
+      b and d or e -> :concurrent
+    end
+  end
+
+  # Insert the new value in store. First check for concurrency 
+  def insert_in_store(state, key, value) do
+    existing_values = state.store.key
+    current_vc = value.vc
+    concurrent_vals = Enum.filter(existing_values, fn x -> if compare_vectors(x.vc, current_vc) == :concurrent do x  end end)
+    concurrent_vals = [value] ++  concurrent_vals
+    %{state | store: Map.put(state.store, key, concurrent_vals)}
+  end
+ 
+  def get_from_store(state, key) do
+    # list of Values will be returned. [%Value{value: a, vc: [..]}, %Value{value: b, vc: [..]}]
+     Map.get(state.store, key)
+  end
+
+  @doc """
+  """
   def update_store(state, entry) do
     case entry do
+      {sender, {:set, client, key, value}} ->
+        {{client, :ok}, insert_in_store(state,key,value)}
 
-      {sender,{:set,r,key,value}} ->
-        {{r, :ok}, insert_in_store(state,key,value)}
-
-      {sender,{:get,r,key}} ->
-        {ret, state} = get_from_store(state,key)
-        {r, {ret}}
-
+      {sender, {:get, client, key}} ->
+        {client, get_from_store(state,key)}
 
       _ ->
         raise "Attempted to get not in store."
