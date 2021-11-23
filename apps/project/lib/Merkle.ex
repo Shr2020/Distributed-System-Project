@@ -1,4 +1,4 @@
-defmodule MerkeTree do
+defmodule MerkleChain do
     def build(kv) do
         key_list = Map.keys(kv)
         sorted_keys = Enum.sort(key_list)
@@ -9,7 +9,7 @@ defmodule MerkeTree do
         key_hash = Crypto.sha256(head)
         val_hash = Crypto.sha256(kv.head)
         total_hash = Crypto.sha256(key_hash<>val_hash)
-        acc = acc ++ [MerkelNode.new(total_hash)]
+        acc = acc ++ [MerkleNode.new(total_hash)]
         build_chain(tail, kv, acc)
     end
 

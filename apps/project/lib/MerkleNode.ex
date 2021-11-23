@@ -1,4 +1,4 @@
-defmodule MerkeNode do
+defmodule MerkleNode do
   alias __MODULE__
   defstruct(
     value: nil
@@ -6,8 +6,8 @@ defmodule MerkeNode do
 
   @type hash :: binary() | String.t()
 
-  @spec new(hash) :: %MerkeNode{}
-  def new(value) do
-    %MerkeNode{value: value}
+  @spec new(hash) :: %MerkleNode{}
+  def new(val) do
+    %MerkleNode{value: val}
   end
 end
