@@ -3,8 +3,13 @@ defmodule Crypto do
     This module defines some cryptographic hash functions used to hash block
     contents.
   """
-  @spec sha256(String.t()) :: String.t()
+  @spec sha256(any()) :: String.t()
   def sha256(data) do
-    hash(data, :sha256)
+    hash(:erlang.term_to_binary(data), :sha256)
+  end
+
+  @spec hash(String.t(), algorithm) :: String.t()
+  def hash(data, algorithm) do
+    :crypto.hash(algorithm, data) |> Base.encode16(case: :lower)
   end
 end
