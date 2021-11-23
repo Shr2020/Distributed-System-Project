@@ -83,7 +83,7 @@ defmodule Dynamo do
 
       {sender,{:get,key,index}} ->
         {ret, state} = get_from_store(state,key)
-        {{r,index, {ret,seqnumber}}
+        {{r,index, {ret,seqnumber}}}
 
 
       _ ->
