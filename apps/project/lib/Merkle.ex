@@ -5,10 +5,10 @@ defmodule MerkeTree do
         build_chain(sorted_keys, kv, [])
     end
 
-    def build_chain(head|tail, kv, acc) do
+    def build_chain([head|tail], kv, acc) do
         key_hash = Crypto.sha256(head)
         val_hash = Crypto.sha256(kv.head)
-        total_hash = Crypto.sha256(key_hash<>val_sh)
+        total_hash = Crypto.sha256(key_hash<>val_hash)
         acc = acc ++ [MerkelNode.new(total_hash)]
         build_chain(tail, kv, acc)
     end

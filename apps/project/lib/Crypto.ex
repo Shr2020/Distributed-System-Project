@@ -8,7 +8,7 @@ defmodule Crypto do
     hash(:erlang.term_to_binary(data), :sha256)
   end
 
-  @spec hash(String.t(), algorithm) :: String.t()
+  @spec hash(String.t(), atom()) :: String.t()
   def hash(data, algorithm) do
     :crypto.hash(algorithm, data) |> Base.encode16(case: :lower)
   end
