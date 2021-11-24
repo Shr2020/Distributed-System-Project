@@ -23,7 +23,10 @@ defmodule Dynamo do
     # The list of current proceses.
     view: nil,
     # Current leader.
-    store: nil
+    store: nil,
+    clock: %{},
+    value_list: [],
+    client_id: nil
   )
 
   @doc """
@@ -34,7 +37,7 @@ defmodule Dynamo do
  
   def new_configuration(
         view,
-        store
+        store    
       ) do
     %Dynamo{
       view: view,
@@ -74,9 +77,11 @@ defmodule Dynamo do
   event occurs, which for our purposes means whenever a message
   is received or sent.
   """
-  @spec update_vector_clock(atom(), map()) :: map()
-  def update_vector_clock(proc, clock) do
-    Map.update!(clock, proc, fn existing_value -> existing_value + 1 end)
+  
+  def update_vector_clock(state) do
+  me = whoami()
+    clock = Map.update!(state.clock, me, fn existing_value -> existing_value + 1 end)
+    %{state | clock: clock}
   end
 
   # Produce a new vector clock that is a copy of v1,
@@ -139,11 +144,11 @@ defmodule Dynamo do
   end
 
   # Insert the new value in store. First check for concurrency 
-  def insert_in_store(state, key, value) do
-    existing_values = state.store.key
-    current_vc = value.vc
-    concurrent_vals = Enum.filter(existing_values, fn x -> if compare_vectors(x.vc, current_vc) == :concurrent do x  end end)
-    concurrent_vals = [value] ++  concurrent_vals
+  def insert_in_store(state, key, value_pair) do
+    existing_values = state.store.get(key)
+    {value,current_vc} = value_pair
+    concurrent_vals = Enum.filter(existing_values, fn {value,vc} -> if compare_vectors(vc, current_vc) == :concurrent do {value,vc}  end end)
+    concurrent_vals = [value_pair] ++  concurrent_vals
     %{state | store: Map.put(state.store, key, concurrent_vals)}
   end
  
@@ -152,20 +157,6 @@ defmodule Dynamo do
      Map.get(state.store, key)
   end
 
-  @doc """
-  """
-  def update_store(state, entry) do
-    case entry do
-      {sender, {:set, client, key, value}} ->
-        {{client, :ok}, insert_in_store(state,key,value)}
-
-      {sender, {:get, client, key}} ->
-        {client, get_from_store(state,key)}
-
-      _ ->
-        raise "Attempted to get not in store."
-    end
-  end
 
  
 
@@ -174,15 +165,6 @@ defmodule Dynamo do
   has just been elected leader.
   """
  
-  def make_coordinator(state) do
-  
-    %{
-      state
-      | is_coordinator: true,
-        current_coordinator: whoami()
-    }
-  end
-
   
   def broadcast_to_others(state, message) do
     me = whoami()
@@ -192,52 +174,17 @@ defmodule Dynamo do
     |> Enum.map(fn pid -> send(pid, message) end)
   end
 
-  @doc """
-  make_follower changes process state for a process
-  to mark it as a follower.
-  """
   
-  def make_replica(state) do
-    %{state | is_coordinator: false}
+
+
+
+  def become_replica(state) do
+    me = whoami()
+    new_clock = Map.put(state.clock,me,0)
+       state = %{state | clock: new_clock}
+    replica(state,%{version_num: 0,count: 0})
   end
 
-
-
-
-  @doc """
-  This function transitions a process so it is
-  a follower.
-  """
-  def add_replica(state) do
-    
-    replica(make_replica(state))
-  end
-
-  @doc """
-  This function implements the state machine for a process
-  that is currently a follower.
-
-  `extra_state` can be used to hod anything that you find convenient
-  when building your implementation.
-  """
-
-  def replica(state) do
-    receive do
-      {sender,entry} ->
-        update_store(state,entry)
-        replica(state)
-      end
-  end
-
-  @doc """
-  This function transitions a process that is not currently
-  the leader so it is a leader.
-  """
-
-  def become_coordinator(state) do
-       
-    coordinator(make_coordinator(state),%{version_num: 0,count: 0})
-  end
 
   
   
@@ -251,40 +198,66 @@ defmodule Dynamo do
   received for each AppendEntry request.
   """
 
-  def coordinator(state,extra_state) do
+  def replica(state,extra_state) do
 
     receive do
       {sender,{:get,key}} ->
-        update_store(state,{:get,key})
-        broadcast_to_others(state,{:get,sender,key})
-        coordinator(state,extra_state)
+        state = %{state | client_id: sender}
+        state = %{state | current_key: key}
+        state = %{state | value_list: [] ++ get_from_store(state,key)}
+        broadcast_to_others(state,{:getfromreplicas,key})
+        replica(state,extra_state)
 
       {sender,{:set,key,value}} ->
-        
-        update_store(state,{:set,key,value})
-        broadcast_to_others(state,{:set,sender,key,value})
-        coordinator(state,extra_state)
+         state = %{state | client_id: sender}    
+        state = insert_in_store(state,key,value)
+        value_pair = {value,state.clock}
+        insert_in_store(state, key, value_pair)
+        broadcast_to_others(state,{:settoreplicas,key,value_pair})
+        replica(state,extra_state)
 
-      {sender,{{r,:ok},state}} ->
+      {sender,{:getfromreplicas,key}} ->
+        value_pair = get_from_store(state,key)
+        send(sender,{:replytoget,key,value_pair})
+        replica(state,extra_state)
+
+      {sender,{:settoreplicas,key,value_pair}} ->
+        state = insert_in_store(state,key,value_pair)
+        send(sender,{:replytoset,:ok,key})
+        replica(state,extra_state)
+
+      {sender,{:replytoget,key,value_pair}} ->
         len = floor(Enum.count(state.view) / 2)
-          
-         
-           send(r,:ok)
-           
-            coordinator(state,extra_state)
-         
-         coordinator(state,extra_state)
-
-
-      {sender,{r,{ret,seqnumber}}} ->
+        if key==state.current_key and extra_state.count<len do
+          state = %{state | current_key: nil,value_list: state.value_list ++ value_pair}
+          extra_state = %{extra_state | count: extra_state.count+1}
+           replica(state,extra_state)
+        end
+        if key==state.current_key and extra_state.count==len do
+          #value = get_recent_value(state.value_list)
+          send(state.client_id,state.value_list)
+           state = %{state | current_key: nil,value_list: nil}
+           extra_state = %{extra_state | count: 0}
+           replica(state,extra_state)
+        end
+         replica(state,extra_state)
+        
+        {sender,{:replytoset,:ok,key}} ->
         len = floor(Enum.count(state.view) / 2)
-        
-           send(r,ret)
-           
-           coordinator(state,extra_state)
-          
-          coordinator(state,extra_state)
-        
+        if key==state.current_key and extra_state.count<len do
+          extra_state = %{extra_state | count: extra_state.count+1}
+           replica(state,extra_state)
+        end
+        if key==state.current_key and extra_state.count==len do
+           send(state.client_id,:ok)
+           state = %{state | current_key: nil}
+           extra_state = %{extra_state | count: 0}
+           replica(state,extra_state)
+        end
+         replica(state,extra_state)
+
+
+     
 
     end
   end
@@ -310,7 +283,7 @@ defmodule Dynamo.Client do
   any process that is in the RSM. We rely on
   redirect messages to find the correct leader.
   """
-  @spec new_client(atom()) :: %Client{coordinator: atom()}
+  
   def new_client(member) do
     %Client{coordinator: member}
   end
@@ -321,9 +294,9 @@ defmodule Dynamo.Client do
   Send a dequeue request to the RSM.
   """
   
-  def get(client) do
+  def get(client,key) do
     coordinator = client.coordinator
-    send(coordinator, :get)
+    send(coordinator, {:get,key})
 
     receive do
 
