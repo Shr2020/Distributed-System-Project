@@ -147,6 +147,7 @@ defmodule Dynamo do
   def insert_in_store(state, key, value_pair) do
     existing_values = state.store.get(key)
     {value,current_vc} = value_pair
+    state = %{state | clock: combine_vector_clocks(state.clock, current_vc)}
     concurrent_vals = Enum.filter(existing_values, fn {value,vc} -> if compare_vectors(vc, current_vc) == :concurrent do {value,vc}  end end)
     concurrent_vals = [value_pair] ++  concurrent_vals
     %{state | store: Map.put(state.store, key, concurrent_vals)}
@@ -174,10 +175,6 @@ defmodule Dynamo do
     |> Enum.map(fn pid -> send(pid, message) end)
   end
 
-  
-
-
-
   def become_replica(state) do
     me = whoami()
     new_clock = Map.put(state.clock,me,0)
@@ -185,9 +182,51 @@ defmodule Dynamo do
     replica(state,%{version_num: 0,count: 0})
   end
 
+def uniq(list) do
+    uniq(list, MapSet.new)
+  end
 
+  defp uniq([x | rest], found) do
+    {val,vc}=x
+    if MapSet.member?(found, vc) do
+      uniq(rest, found)
+    else
+      [x | uniq(rest, MapSet.put(found, vc))]
+    end
+  end
+
+  defp uniq([], _) do
+    []
+  end
+
+  def get_recent_value([head1|tail],l2,acc) do
+
+      acc = loop1(head1,l2,acc)
+      get_recent_value(tail,l2,acc)
+end
+
+def get_recent_value([],_,acc) do
+  acc
+end
+
+def loop1(val1,[head2 | tail2],acc) do
+{value1,vc1} = val1
+{value2,vc2} = head2
+if compare_vectors(vc1,vc2)!=:before do
+  loop1(val1,tail2,acc)
+else
+  loop1([],[],acc)
+end
+end
+
+def loop1(val1,[],acc) do
+  acc+val1
+end
+
+def comparinglist(l1, l2 ) do
+  uniq(get_recent_value(l1,l2,[]) ++ get_recent_value(l2,l1,[]))
   
-  
+end
 
   @doc """
   This function implements the state machine for a process
@@ -229,14 +268,16 @@ defmodule Dynamo do
       {sender,{:replytoget,key,value_pair}} ->
         len = floor(Enum.count(state.view) / 2)
         if key==state.current_key and extra_state.count<len do
-          state = %{state | current_key: nil,value_list: state.value_list ++ value_pair}
+          newvalue_pairs = comparinglist(state.value_list,value_pair)
+          state = %{state | value_list: newvalue_pairs}
           extra_state = %{extra_state | count: extra_state.count+1}
            replica(state,extra_state)
         end
         if key==state.current_key and extra_state.count==len do
-          #value = get_recent_value(state.value_list)
+          newvalue_pairs = comparinglist(state.value_list,value_pair)
+          state = %{state | value_list: newvalue_pairs}
           send(state.client_id,state.value_list)
-           state = %{state | current_key: nil,value_list: nil}
+           state = %{state | current_key: nil,value_list: nil,client_id: nil}
            extra_state = %{extra_state | count: 0}
            replica(state,extra_state)
         end
@@ -250,7 +291,7 @@ defmodule Dynamo do
         end
         if key==state.current_key and extra_state.count==len do
            send(state.client_id,:ok)
-           state = %{state | current_key: nil}
+           state = %{state | current_key: nil,client_id: nil}
            extra_state = %{extra_state | count: 0}
            replica(state,extra_state)
         end
