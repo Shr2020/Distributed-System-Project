@@ -17,7 +17,24 @@ defmodule MerkleChain do
         acc
     end
 
-    def compare_two_trees(mk1, mk2) do
 
+    def compare_two_trees([head1|tail1], [head2|tail2]) do
+    
+        if head1==head2 do
+            []
+        else
+          compare_two_trees(tail1,tail2) ++ head2
+
+        end
+
+    end
+    def compare_two_trees([], mk2) do
+        mk2
+    end
+    def compare_two_trees(mk1, []) do
+        mk1
+    end
+    def compare_two_trees([], []) do
+        []
     end
 end
