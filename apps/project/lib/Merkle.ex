@@ -21,31 +21,46 @@ defmodule MerkleChain do
 
     # First argument is the tree received from other node for synchronisation.
     # The return value are the matched hashes between the two lists
-    # TODO: change the logic
-    def compare_two_trees([head1|tail1], [head2|tail2]) do
-        if head1==head2 do
-            []
+    def compare_two_chains(hashchain1, hashchain2) do
+        matched_hashes = compare_two_chains(hashchain1, hashchain2, [])
+    end
+
+    def compare_two_chains([head1|tail1], hashchain2, acc) do
+        acc =
+        if Enum.member?(hashchain2, head1) do
+            acc = acc ++ [head1|tail1]
         else
-            [head2] ++ compare_two_trees(tail1,tail2) 
+            compare_two_chains(tail1, hashchain2, acc)
         end
     end
 
-    def compare_two_trees([], mk2) do
-        mk2
+    def compare_two_chains([], hashchain2, acc) do
+        acc
     end
 
-    def compare_two_trees(mk1, []) do
-        mk1
+    #function to get the key value map of unmatched hashes
+    def get_unmatched_elements(kv, [], merkle_chain, key_list) do
+        kv
     end
 
-    def compare_two_trees([], []) do
-        []
+    def get_unmatched_elements(kv, [head|tail], merkle_chain, key_list) do
+        get_unmatched_elements(kv, head, merkle_chain, key_list, %{})
     end
 
-    #TODO: function to get the key value map of unmatched hashes
-    #def get_unmatched_hashes(kv, matched_hashes_received, merkle_chain, key_list) do
-    #end
+    def get_unmatched_elements(kv, head, [head1|tail1], [head2|tail2], acc) do
+        if head == head1 do
+            acc
+        else
+            acc = Map.put(acc, head2, kv.head2)
+            get_unmatched_elements(kv, head, tail1, tail2, acc)
+        end
+    end
 
+    def get_unmatched_elements(kv, head, [], [], acc) do
+        :merkle_error
+    end
+
+    # resolve the kv map with entries received for synchronization
     def merge_and_resolve_kv(received, kv, state) do
         merged_kv = 
             Map.merge(received, m2, fn _k, v1, v2 ->              

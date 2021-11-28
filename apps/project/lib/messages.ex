@@ -31,5 +31,56 @@ defmodule Dynamo.Message do
   end
 end
 
+defmodule MerkleSynchroRequest do
+  alias __MODULE__
+  defstruct(
+    merkle_chain: nil
+    match_entries: nil
+  )
+
+  def new(chain, entries) do
+    %MerkleSynchroRequest{merkle_chain: chain, match_entries: entries}
+  end
+end
+
+defmodule MerkleSynchroResponse do
+  alias __MODULE__
+  defstruct(
+    matched_hashes: nil
+    success: nil
+  )
+
+  def new(hashes, success) do
+    %MerkleSynchroResponse{matched_hashes: hashes, success: success}
+  end
+end
+
+
+defmodule ReplicationRequest do
+  alias __MODULE__
+  defstruct(
+    key: nil
+    value: nil
+    op: nil
+  )
+
+  def new(k, v, oper) do
+    %ReplicationRequest{key: k, value: v, op: oper}
+  end
+end
+
+defmodule ReplicationResponse do
+  alias __MODULE__
+  defstruct(
+    key: nil
+    success: nil
+    op: nil
+  )
+
+  def new(k, succ, oper) do
+    %ReplicationRequest{key: k, success: succ, op: oper}
+  end
+end
+
 
 
