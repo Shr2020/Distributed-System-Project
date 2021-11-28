@@ -10,9 +10,6 @@ defmodule Dynamo.Message do
     requester: nil,
     argument: nil
   )
-
-  
-
   
   def put(index, term, requester, item) do
     %Message{

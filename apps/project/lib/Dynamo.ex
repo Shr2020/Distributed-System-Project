@@ -27,6 +27,13 @@ defmodule Dynamo do
     clock: %{},
     value_list: [],
     client_id: nil
+    merkle_hash: nil
+    merkle_key_set: nil
+    
+    # Read_qourum
+    R: 1
+    # write_qourum
+    W: 2
   )
 
   @doc """
@@ -164,9 +171,7 @@ defmodule Dynamo do
   @doc """
   make_leader changes process state for a process that
   has just been elected leader.
-  """
- 
-  
+  """  
   def broadcast_to_others(state, message) do
     me = whoami()
 
@@ -184,48 +189,47 @@ defmodule Dynamo do
 
 def uniq(list) do
     uniq(list, MapSet.new)
-  end
-
-  defp uniq([x | rest], found) do
-    {val,vc}=x
-    if MapSet.member?(found, vc) do
-      uniq(rest, found)
-    else
-      [x | uniq(rest, MapSet.put(found, vc))]
-    end
-  end
-
-  defp uniq([], _) do
-    []
-  end
-
-  def get_recent_value([head1|tail],l2,acc) do
-
-      acc = loop1(head1,l2,acc)
-      get_recent_value(tail,l2,acc)
 end
 
-def get_recent_value([],_,acc) do
+defp uniq([x | rest], found) do
+  {val,vc}=x
+  if MapSet.member?(found, vc) do
+    uniq(rest, found)
+  else
+    [x | uniq(rest, MapSet.put(found, vc))]
+  end
+end
+
+defp uniq([], _) do
+  []
+end
+
+def get_recent_value([head1|tail], l2, acc) do
+
+    acc = loop1(head1, l2, acc)
+    get_recent_value(tail, l2, acc)
+end
+
+def get_recent_value([], _, acc) do
   acc
 end
 
-def loop1(val1,[head2 | tail2],acc) do
-{value1,vc1} = val1
-{value2,vc2} = head2
-if compare_vectors(vc1,vc2)!=:before do
-  loop1(val1,tail2,acc)
-else
-  loop1([],[],acc)
-end
+def loop1(val1, [head2 | tail2],acc) do
+  {value1, vc1} = val1
+  {value2, vc2} = head2
+  if compare_vectors(vc1, vc2) != :before do
+    loop1(val1, tail2, acc)
+  else
+    loop1([], [], acc)
+  end
 end
 
 def loop1(val1,[],acc) do
-  acc+val1
+  acc + val1
 end
 
 def comparinglist(l1, l2 ) do
-  uniq(get_recent_value(l1,l2,[]) ++ get_recent_value(l2,l1,[]))
-  
+  uniq(get_recent_value(l1, l2, []) ++ get_recent_value(l2, l1, []))
 end
 
   @doc """
@@ -240,66 +244,70 @@ end
   def replica(state,extra_state) do
 
     receive do
+      # get request from client
       {sender,{:get,key}} ->
         state = %{state | client_id: sender}
         state = %{state | current_key: key}
         state = %{state | value_list: [] ++ get_from_store(state,key)}
-        broadcast_to_others(state,{:getfromreplicas,key})
+        broadcast_to_others(state, {:getfromreplicas, key})
         replica(state,extra_state)
 
+      # set request from client
       {sender,{:set,key,value}} ->
          state = %{state | client_id: sender}    
         state = insert_in_store(state,key,value)
         value_pair = {value,state.clock}
         insert_in_store(state, key, value_pair)
-        broadcast_to_others(state,{:settoreplicas,key,value_pair})
+        broadcast_to_others(state,{:settoreplicas, key, value_pair})
         replica(state,extra_state)
 
-      {sender,{:getfromreplicas,key}} ->
+      # read qourum request
+      {sender,{:getfromreplicas, key}} ->
         value_pair = get_from_store(state,key)
-        send(sender,{:replytoget,key,value_pair})
-        replica(state,extra_state)
+        send(sender, {:replytoget, key, value_pair})
+        replica(state, extra_state)
 
-      {sender,{:settoreplicas,key,value_pair}} ->
+      # write qourum request
+      {sender,{:settoreplicas, key, value_pair}} ->
         state = insert_in_store(state,key,value_pair)
-        send(sender,{:replytoset,:ok,key})
+        send(sender, {:replytoset, :ok, key})
+        replica(state, extra_state)
+
+      # read qourum replies
+      {sender,{:replytoget, key, value_pair}} ->
+        len = floor(Enum.count(state.view) / 2)
+        if key == state.current_key and extra_state.count < len do
+          newvalue_pairs = comparinglist(state.value_list, value_pair)
+          state = %{state | value_list: newvalue_pairs}
+          extra_state = %{extra_state | count: extra_state.count+1}
+           replica(state,extra_state)
+        end
+
+        if key == state.current_key and extra_state.count == len do
+          newvalue_pairs = comparinglist(state.value_list, value_pair)
+          state = %{state | value_list: newvalue_pairs}
+          send(state.client_id, state.value_list)
+           state = %{state | current_key: nil, value_list: nil, client_id: nil}
+           extra_state = %{extra_state | count: 0}
+           replica(state,extra_state)
+        end
         replica(state,extra_state)
-
-      {sender,{:replytoget,key,value_pair}} ->
-        len = floor(Enum.count(state.view) / 2)
-        if key==state.current_key and extra_state.count<len do
-          newvalue_pairs = comparinglist(state.value_list,value_pair)
-          state = %{state | value_list: newvalue_pairs}
-          extra_state = %{extra_state | count: extra_state.count+1}
-           replica(state,extra_state)
-        end
-        if key==state.current_key and extra_state.count==len do
-          newvalue_pairs = comparinglist(state.value_list,value_pair)
-          state = %{state | value_list: newvalue_pairs}
-          send(state.client_id,state.value_list)
-           state = %{state | current_key: nil,value_list: nil,client_id: nil}
-           extra_state = %{extra_state | count: 0}
-           replica(state,extra_state)
-        end
-         replica(state,extra_state)
         
-        {sender,{:replytoset,:ok,key}} ->
+      # write qourum replies
+      {sender, {:replytoset, :ok, key}} ->
         len = floor(Enum.count(state.view) / 2)
-        if key==state.current_key and extra_state.count<len do
+        if key == state.current_key and extra_state.count<len do
           extra_state = %{extra_state | count: extra_state.count+1}
-           replica(state,extra_state)
+          replica(state,extra_state)
         end
+
         if key==state.current_key and extra_state.count==len do
-           send(state.client_id,:ok)
-           state = %{state | current_key: nil,client_id: nil}
-           extra_state = %{extra_state | count: 0}
-           replica(state,extra_state)
+          send(state.client_id,:ok)
+          state = %{state | current_key: nil,client_id: nil}
+          extra_state = %{extra_state | count: 0}
+          replica(state,extra_state)
         end
-         replica(state,extra_state)
-
-
-     
-
+        replica(state,extra_state)
     end
   end
 
