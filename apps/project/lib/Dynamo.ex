@@ -27,6 +27,8 @@ defmodule Dynamo do
     clock: %{},
     value_list: [],
     client_id: nil
+
+    merkle_version = 0
     merkle_hash: nil
     merkle_key_set: nil
     

@@ -1,8 +1,9 @@
 defmodule MerkleChain do
-    def build(state, kv) do
+    def build_chain(state, kv) do
         key_list = Map.keys(kv)
         sorted_keys = Enum.sort(key_list)
         state = Map.put(state, :merkle_key_set, sorted_keys)
+        state = Map.put(state, :merkle_version, state.merkle_version + 1)
         build_chain(sorted_keys, kv, [])
     end
 
@@ -99,17 +100,17 @@ defmodule MerkleChain do
         acc
     end
 
-    def resolve2(vc_map1, [head|tail], acc) do
-        result = Dynamo.compare_vectors(vc_map1, head)
+    def resolve2(val_vc_1, [head|tail], acc) do
+        result = Dynamo.compare_vectors(val_vc_1.vc, head.vc)
         acc = 
             if result == :concurrent do
-                acc |> MapSet.put(vc_map1) |> MapSet.put(head)
+                acc |> MapSet.put(val_vc_1) |> MapSet.put(head)
             else
                 acc =
                     if result == :before do
                         acc |> MapSet.put(head)
                     else
-                        acc |> MapSet.put(vc_map1)
+                        acc |> MapSet.put(val_vc_1)
                     end
             end
         resolve2(vc_map1, tail, kv, acc)

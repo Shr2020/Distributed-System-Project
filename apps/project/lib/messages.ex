@@ -34,24 +34,26 @@ end
 defmodule MerkleSynchroRequest do
   alias __MODULE__
   defstruct(
+    version: nil
     merkle_chain: nil
     match_entries: nil
   )
 
   def new(chain, entries) do
-    %MerkleSynchroRequest{merkle_chain: chain, match_entries: entries}
+    %MerkleSynchroRequest{version: ver, merkle_chain: chain, match_entries: entries}
   end
 end
 
 defmodule MerkleSynchroResponse do
   alias __MODULE__
   defstruct(
+    version: nil
     matched_hashes: nil
     success: nil
   )
 
-  def new(hashes, success) do
-    %MerkleSynchroResponse{matched_hashes: hashes, success: success}
+  def new(ver, hashes, success) do
+    %MerkleSynchroResponse{version: ver, matched_hashes: hashes, success: success}
   end
 end
 
