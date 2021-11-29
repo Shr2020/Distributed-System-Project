@@ -1,4 +1,4 @@
-defmodule Dynamo.Message do
+defmodule ClientMessage do
   @moduledoc """
   Log entry for Raft implementation.
   """
@@ -12,7 +12,7 @@ defmodule Dynamo.Message do
   )
   
   def put(index, term, requester, item) do
-    %Message{
+    %ClientMessage{
       index: index,
       requester: requester,
       operation: :set,
@@ -22,7 +22,7 @@ defmodule Dynamo.Message do
 
 
   def get(index,key,requester) do
-    %Message{
+    %ClientMessage{
       index: index,
       requester: requester,
       operation: :get,

@@ -30,6 +30,15 @@ defmodule Dynamo do
     merkle_hash: nil
     merkle_key_set: nil
     
+    #timers
+    min_merkle_timeout: nil,
+    max_merkle_timeout: nil,
+    merkle_timer: nil,
+
+    # Time between heartbeats from the leader.
+    gossip_timeout: nil,
+    gossip_timer: nil,
+
     # Read_qourum
     R: 1
     # write_qourum
@@ -50,6 +59,48 @@ defmodule Dynamo do
       view: view,
       store: Map.new()
     }
+  end
+
+  @spec get_merkle_time(%Dynamo{}) :: non_neg_integer()
+  defp get_merkle_time(state) do
+    state.min_merkle_timeout +
+      :rand.uniform(
+        state.max_merkle_timeout -
+          state.min_merkle_timeout
+      )
+  end
+
+  # Save a handle to the merkle timer.
+  @spec save_merkle_timer(%Dynamo{}, reference()) :: %Dynamo{}
+  defp save_merkle_timer(state, timer) do
+    %{state | merkle_timer: timer}
+  end
+
+  # Save a handle to the gossip timer.
+  @spec save_gossip_timer(%Dynamo{}, reference()) :: %Dynamo{}
+  defp save_gossip_timer(state, timer) do
+    %{state | gossip_timer: timer}
+  end
+
+  @spec reset_merkle_timer(%Dynamo{}) :: %Dynamo{}
+  defp reset_merkle_timer(state) do
+    if state.merkle_timer != nil do
+      Emulation.cancel_timer(state.merkle_timer)
+    end
+    new_time = get_merkle_time(state)
+    new_timer = Emulation.timer(new_time, :MT)
+    state = save_merkle_timer(state, new_timer)
+    state
+  end
+
+  @spec reset_gossip_timer(%Dynamo{}) :: %Dynamo{}
+  defp reset_gossip_timer(state) do
+    if state.gossip_timer != nil do
+      Emulation.cancel_timer(state.gossip_timer)
+    end
+    new_timer = Emulation.timer(state.gossip_timeout, :GT)
+    state = save_gossip_timer(state, new_timer)
+    state
   end
 
   # Combine a single component in a vector clock.
@@ -164,9 +215,6 @@ defmodule Dynamo do
     # list of Values will be returned. [%Value{value: a, vc: [..]}, %Value{value: b, vc: [..]}]
      Map.get(state.store, key)
   end
-
-
- 
 
   @doc """
   make_leader changes process state for a process that
