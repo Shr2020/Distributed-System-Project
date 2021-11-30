@@ -61,8 +61,8 @@ end
 defmodule ReplicationRequest do
   alias __MODULE__
   defstruct(
-    key: nil
-    value: nil
+    key: nil,
+    value: nil,
     op: nil
   )
 
@@ -74,13 +74,13 @@ end
 defmodule ReplicationResponse do
   alias __MODULE__
   defstruct(
-    key: nil
-    success: nil
+    key: nil,
+    value: nil,
     op: nil
   )
 
-  def new(k, succ, oper) do
-    %ReplicationRequest{key: k, success: succ, op: oper}
+  def new(k, val, oper) do
+    %ReplicationRequest{key: k, value: val, op: oper}
   end
 end
 
