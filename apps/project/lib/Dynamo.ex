@@ -211,6 +211,7 @@ defmodule Dynamo do
     concurrent_vals = Enum.filter(existing_values, fn {value,vc} -> if compare_vectors(vc, current_vc) == :concurrent do {value,vc}  end end)
     concurrent_vals = [value_pair] ++  concurrent_vals
     %{state | store: Map.put(state.store, key, concurrent_vals)}
+    state = Merkle.build_and_store_chain(state.store, state)
   end
  
   def get_from_store(state, key) do
@@ -362,80 +363,60 @@ end
       # Merkle Synchronization req
       {sender,
         %MerkleSynchroRequest{
-          version: index,
-          merkle_chain: nil
-          match_entries: nil
+          version: ver,
+          merkle_chain: chain
+          match_entries: entries
       }} -> 
-        raise "Not yet impelemented"
+        # request sent first time
+        state = 
+          if entries == [] do
+            matched_hash = Merkle.comapare_two_chains(state.merkle_hash, chain)
+            state = 
+              if List.starts_with?(matched_hash, chain) do
+                send(sender, MerkleSynchroResponse.new(ver, matched_hash, True))
+                state
+              else
+                send(sender, MerkleSynchroResponse.new(ver, matched_hash, False))
+                state
+              end
+          else
+            # request with entries
+            state = Merkle.merge_and_resolve_kv(entries, state.store, state)
+            state = Merkle.build_and_store_chain(state.store, state)
+          end
+        replica(state, extra_state)
 
       # Merkle synchronization response
       {sender,
         %MerkleSynchroResponse{
-          version: nil
-          matched_hashes: nil
-          success: nil
+          version: ver
+          matched_hashes: hash
+          success: succ
       }} -> 
-        raise "Not yet impelemented"
+        # working on same merkle Tree
+        if ver == state.merkle_version do
+          if not succ do
+            #synchronization needed
+            entries = Merkle.get_unmatched_elements(state.store, hash, state.merkle_hash, state.merkle_key_set)
+            send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hash, entries))
+          end
+        else
+          # version has changed. This response no longer valid. send request with new chain
+          send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hash, []))
+        end
+        replica(state, extra_state)
 
       # Merkle timeout. Send synchronization request
       :MT ->
-        raise "Not yet implemented"       
-    end
-  end
-end
-
-
-
-defmodule Dynamo.Client do
-  import Emulation, only: [send: 2]
-
-  import Kernel,
-    except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
-
-  @moduledoc """
-  A client that can be used to connect and send
-  requests to the RSM.
-  """
-  alias __MODULE__
-  @enforce_keys [:coordinator]
-  defstruct(coordinator: nil)
-
-  @doc """
-  Construct a new Dynamo Client. This takes an ID of
-  any process that is in the RSM. We rely on
-  redirect messages to find the correct leader.
-  """
-  
-  def new_client(member) do
-    %Client{coordinator: member}
-  end
-
-  
-
-  @doc """
-  Send a dequeue request to the RSM.
-  """
-  
-  def get(client,key) do
-    coordinator = client.coordinator
-    send(coordinator, {:get,key})
-
-    receive do
-
-      {_, v} ->
-        {v, client}
-    end
-  end
-
-
-  
-  def put(client,key,value) do
-    coordinator = client.coordinator
-    send(coordinator, {:put,key,value})
-
-    receive do
-      {_, :ok} ->
-        {:ok, client}
+        # if key value store has keys
+        if Map.keys(state.store) != [] do
+          # choose randomly one process
+          sender = state.view |> Enum.filter(fn pid -> pid != whoami() end) |> Enum.random()
+          # send request
+          send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hash, []))
+        end
+        state = reset_merkle_timer(state)
+        replica(state, extra_state)   
     end
   end
 end

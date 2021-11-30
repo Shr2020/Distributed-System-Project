@@ -1,10 +1,11 @@
 defmodule MerkleChain do
-    def build_chain(state, kv) do
+    def build_and_store_chain(state, kv) do
         key_list = Map.keys(kv)
         sorted_keys = Enum.sort(key_list)
         state = Map.put(state, :merkle_key_set, sorted_keys)
         state = Map.put(state, :merkle_version, state.merkle_version + 1)
-        build_chain(sorted_keys, kv, [])
+        new_chain = build_chain(sorted_keys, kv, [])
+        Map.put(statem, :merkle_hash, new_chain)
     end
 
     def build_chain([head|tail], kv, acc) do
@@ -64,7 +65,7 @@ defmodule MerkleChain do
     # resolve the kv map with entries received for synchronization
     def merge_and_resolve_kv(received, kv, state) do
         merged_kv = 
-            Map.merge(received, m2, fn _k, v1, v2 ->              
+            Map.merge(received, kv, fn _k, v1, v2 ->              
                 if v1 == v2 do
                     v1
                 else
