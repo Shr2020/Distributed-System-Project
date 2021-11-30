@@ -300,7 +300,8 @@ end
         state = %{state | client_id: sender}
         state = %{state | current_key: key}
         state = %{state | value_list: [] ++ get_from_store(state,key)}
-        broadcast_to_others(state, {:getfromreplicas, key})
+        msg = ReplicationRequest.new(key,nil,:get)
+        broadcast_to_others(state, msg)
         replica(state,extra_state)
 
       # set request from client
@@ -309,32 +310,50 @@ end
         state = insert_in_store(state,key,value)
         value_pair = {value,state.clock}
         insert_in_store(state, key, value_pair)
-        broadcast_to_others(state,{:settoreplicas, key, value_pair})
+         msg = ReplicationRequest.new(key,value_pair,:set)
+        broadcast_to_others(state,msg)
         replica(state,extra_state)
 
       # read qourum request
-      {sender,{:getfromreplicas, key}} ->
+      {sender,
+       %ReplicationRequest{
+         key: key,
+         value: value_pair,
+         op: :get
+       }} ->
         value_pair = get_from_store(state,key)
-        send(sender, {:replytoget, key, value_pair})
+         msg = ReplicationResponse.new(key,value_pair,:get)
+        send(sender, msg)
         replica(state, extra_state)
 
       # write qourum request
-      {sender,{:settoreplicas, key, value_pair}} ->
+      {sender,
+       %ReplicationRequest{
+         key: key,
+         value: value_pair,
+         op: :set
+       }} ->
         state = insert_in_store(state,key,value_pair)
-        send(sender, {:replytoset, :ok, key})
+        msg = ReplicationResponse.new(key,:ok,:set)
+        send(sender, msg)
         replica(state, extra_state)
 
       # read qourum replies
-      {sender,{:replytoget, key, value_pair}} ->
-        len = floor(Enum.count(state.view) / 2)
-        if key == state.current_key and extra_state.count < len do
+      {sender,
+       %ReplicationResponse{
+         key: key,
+         value: value_pair,
+         op: :get
+       }} ->
+        
+        if key == state.current_key and extra_state.count < state.R do
           newvalue_pairs = comparinglist(state.value_list, value_pair)
           state = %{state | value_list: newvalue_pairs}
           extra_state = %{extra_state | count: extra_state.count+1}
            replica(state,extra_state)
         end
 
-        if key == state.current_key and extra_state.count == len do
+        if key == state.current_key and extra_state.count == state.R do
           newvalue_pairs = comparinglist(state.value_list, value_pair)
           state = %{state | value_list: newvalue_pairs}
           send(state.client_id, state.value_list)
@@ -344,15 +363,19 @@ end
         end
         replica(state,extra_state)
         
-      # write qourum replies
-      {sender, {:replytoset, :ok, key}} ->
+      {sender,
+       %ReplicationResponse{
+         key: key,
+         value: :ok,
+         op: :set
+       }} ->
         len = floor(Enum.count(state.view) / 2)
-        if key == state.current_key and extra_state.count<len do
+        if key == state.current_key and extra_state.count<state.W do
           extra_state = %{extra_state | count: extra_state.count+1}
           replica(state,extra_state)
         end
 
-        if key==state.current_key and extra_state.count==len do
+        if key==state.current_key and extra_state.count==state.W do
           send(state.client_id,:ok)
           state = %{state | current_key: nil,client_id: nil}
           extra_state = %{extra_state | count: 0}
