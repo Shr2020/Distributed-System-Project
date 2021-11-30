@@ -358,11 +358,34 @@ end
           replica(state,extra_state)
         end
         replica(state,extra_state)
+
+      # Merkle Synchronization req
+      {sender,
+        %MerkleSynchroRequest{
+          version: index,
+          merkle_chain: nil
+          match_entries: nil
+      }} -> 
+        raise "Not yet impelemented"
+
+      # Merkle synchronization response
+      {sender,
+        %MerkleSynchroResponse{
+          version: nil
+          matched_hashes: nil
+          success: nil
+      }} -> 
+        raise "Not yet impelemented"
+
+      # Merkle timeout. Send synchronization request
+      :MT ->
+        raise "Not yet implemented"       
     end
   end
-
-  
 end
+
+
+
 defmodule Dynamo.Client do
   import Emulation, only: [send: 2]
 
