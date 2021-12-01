@@ -32,6 +32,58 @@ defmodule MerkleTest do
                       d: [%Value{val: 9, vc: %{x: 2, y: 1, z: 1}}]}
     assert new_map == expected_map
   end
+
+  test "test get_unmatched_elements" do
+    kv =  %{a: [%Value{val: 3, vc: %{x: 1, y: 1, z: 0}}, %Value{val: 4, vc: %{x: 1, y: 0, z: 1}}], 
+                      b: [%Value{val: 7, vc: %{x: 1, y: 1, z: 1}}], 
+                      c: [%Value{val: 8, vc: %{x: 1, y: 3, z: 1}}], 
+                      d: [%Value{val: 9, vc: %{x: 2, y: 1, z: 1}}]}
+    
+    key_list = [:a, :b, :c, :d]
+
+    merkle_chain = [4, 3, 2, 1]
+
+    received = [2, 1]
+
+    elements = Merkle.get_unmatched_elements(kv, received, merkle_chain, key_list)
+
+    expected = %{a: [%Value{val: 3, vc: %{x: 1, y: 1, z: 0}}, %Value{val: 4, vc: %{x: 1, y: 0, z: 1}}], 
+                 b: [%Value{val: 7, vc: %{x: 1, y: 1, z: 1}}]}
+
+    assert elements == expected
+  end
+
+  test "compare_two_chains" do
+    mA = [1, 2, 3, 4, 5, 6]
+    mB = [0, 7, 8, 9, 5, 6 ]
+    result = Merkle.compare_two_chains(mA, mB)
+    expected = [5, 6]
+    assert result == expected
+
+    mA = [1, 2, 3, 4, 5, 6]
+    mB = [7, 3, 4, 5, 6]
+    result = Merkle.compare_two_chains(mA, mB)
+    expected = [3, 4, 5, 6]
+    assert result == expected
+
+    mA = [1, 2, 3, 4, 5, 6]
+    mB = [7, 8, 9, 5, 6]
+    result = Merkle.compare_two_chains(mA, mB)
+    expected = [5, 6]
+    assert result == expected
+
+    mA = [1, 3, 5, 6]
+    mB = [7, 8, 9, 10, 5, 6]
+    result = Merkle.compare_two_chains(mA, mB)
+    expected = [5, 6]
+    assert result == expected
+
+    mA = [1, 3, 5, 6]
+    mB = [7, 8, 9, 10, 5, 6]
+    result = Merkle.compare_two_chains(mA, mB)
+    expected = [5, 6]
+    assert result == expected
+  end
 end
 
   

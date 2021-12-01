@@ -53,7 +53,8 @@ defmodule Merkle do
         if head == head1 do
             acc
         else
-            acc = Map.put(acc, head2, kv.head2)
+            res = Map.fetch(kv, head2)
+            acc = Map.put(acc, head2, elem(res, 1))
             get_unmatched_elements(kv, head, tail1, tail2, acc)
         end
     end
