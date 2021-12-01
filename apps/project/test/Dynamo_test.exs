@@ -28,7 +28,9 @@ defmodule DynamoTest do
           "Received response for set #{inspect(v)} "
         )
         {value, client} = Dynamo.Client.get(client,random_server,:g)
-
+        IO.puts(
+          "Received value for get #{inspect(value)} "
+        )
         receive do
         after
           5_000 -> true

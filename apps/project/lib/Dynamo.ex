@@ -217,8 +217,8 @@ defmodule Dynamo do
           "checking valuepair for set #{inspect(value_pair)} "
         )
     {value,current_vc} = value_pair
-    state = %{state | clock: combine_vector_clocks(state.clock, current_vc)}
-    concurrent_vals = Enum.filter(existing_values, fn {value,vc} -> if compare_vectors(vc, current_vc) == :concurrent do {value,vc}  end end)
+    state = %{state | clock: combine_vector_clocks(state.clock,value_pair.vc)}
+    concurrent_vals = Enum.filter(existing_values, fn x -> if compare_vectors(x.vc, value_pair.vc) == :concurrent do x  end end)
     concurrent_vals = [value_pair] ++  concurrent_vals
     %{state | store: Map.put(state.store, key, concurrent_vals)}
     #state = Merkle.build_and_store_chain(state.store, state)
@@ -254,15 +254,14 @@ defmodule Dynamo do
   end
 
 def uniq(list) do
-    uniq(list, MapSet.new)
+    uniq(list, MapSet.new())
 end
 
 defp uniq([x | rest], found) do
-  {val,vc}=x
-  if MapSet.member?(found, vc) do
+  if MapSet.member?(found, x.vc) do
     uniq(rest, found)
   else
-    [x | uniq(rest, MapSet.put(found, vc))]
+    [x | uniq(rest, MapSet.put(found, x.vc))]
   end
 end
 
@@ -277,30 +276,27 @@ def get_recent_value([head1|tail], l2, acc) do
 end
 
 def get_recent_value([],l2, acc) do
-  acc ++ l2
+  
+  acc
 end
 
-def get_recent_value(l1,[], acc) do
-  acc ++ l1
-end
 
-def loop1(val1, [head2 | tail2],acc) do
-  {value1, vc1} = val1
-  {value2, vc2} = head2
-  if compare_vectors(vc1, vc2) != :before do
-    loop1(val1, tail2, acc)
+def loop1(head1, [head2 | tail2],acc) do
+  if compare_vectors(head1.vc, head2.vc) != :before do
+    loop1(head1, tail2, acc)
   else
-    loop1([], [], acc)
+    acc
   end
 end
 
 def loop1(val1,[],acc) do
-  acc + val1
+
+  acc ++ [val1]
 end
 
 def comparinglist(l1, l2 ) do
   IO.puts(
-          "checking lists for replica server at last #{inspect(l1)} and current_key is #{inspect(l2)}" 
+          "checking lists for replica server at last #{inspect(get_recent_value(l1, l2, []))} and current_key is #{inspect(get_recent_value(l2, l1, []))}" 
         )
   uniq(get_recent_value(l1, l2, []) ++ get_recent_value(l2, l1, []))
 end
@@ -333,8 +329,9 @@ end
 
       # set request from client
       {sender,{:set,key,value}} ->
+        state = update_vector_clock(state)
         state = %{state | client_id: sender,current_key: key}    
-        value_pair = {value,state.clock}
+        value_pair = Value.new(value,state.clock)
         state = insert_in_store(state, key, value_pair)
         msg = ReplicationRequest.new(key,value_pair,:set)
         broadcast_to_others(state,msg)
@@ -388,6 +385,9 @@ end
             state = %{state | value_list: newvalue_pairs}
            replica(state,extra_state)
           else
+            IO.puts(
+          "checking lists for server #{inspect(state.value_list)} and value pair is #{inspect(value_pair)}" 
+        )
             newvalue_pairs = comparinglist(state.value_list, value_pair)
             state = %{state | value_list: newvalue_pairs}
             send(state.client_id, state.value_list)
