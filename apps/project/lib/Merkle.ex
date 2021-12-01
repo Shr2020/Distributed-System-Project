@@ -72,52 +72,65 @@ defmodule Merkle do
                     v1 ++ v2
                 end
             end)
-        kv_latest = resolve_map(merged_kv)
-        state = Map.put(state, :kv, kv_latest)
+        kv_latest = resolve_map(merged_kv, %{})
+        state = Map.put(state, :store, kv_latest)
+        kv_latest
     end
 
-    def resolve_map(kv) do
+    def resolve_map(kv, new_kv) do
         key_list = Map.keys(kv)
-        resolve_key_value(key_list, kv)
+        resolve_key_value(key_list, kv, new_kv)
     end
 
-    def resolve_key_value([head|tail], kv) do
-        val1 = kv.head
-        vals = resolve1(val1, val1, MapSet.new())
-        kv = Map.put(kv, head, MapSet.to_list(vals))
-        resolve_key_value(tail, kv)
+    def resolve_key_value([head|tail], kv, new_kv) do
+        val1 = elem(Map.fetch(kv, head), 1)
+        vals = resolve1(val1, val1, MapSet.new(), MapSet.new())
+        list_vals = MapSet.to_list(vals)
+        new_kv = Map.put(new_kv, head, list_vals)
+        resolve_key_value(tail, kv, new_kv)
     end
 
-    def resolve_key_value([], kv) do
-        kv
+    def resolve_key_value([], kv, new_kv) do
+        new_kv
     end
 
-    def resolve1([head1|tail1], val_list, acc) do
-        acc = resolve2(head1, val_list, acc)
-        resolve1(tail1, val_list, acc)
+    def resolve1([head1|tail1], val_list, acc, before_acc) do
+        acc = resolve2(head1, val_list, acc, before_acc)
+        resolve1(tail1, val_list, acc, before_acc)
     end
 
-    def resolve1([], val_list, acc) do
+    def resolve1([], val_list, acc, before_acc) do
         acc
     end
 
-    def resolve2(val_vc_1, [head|tail], acc) do
+    def resolve2(val_vc_1, [head|tail], acc, before_acc) do
         result = Dynamo.compare_vectors(val_vc_1.vc, head.vc)
         acc = 
             if result == :concurrent do
-                acc |> MapSet.put(val_vc_1) |> MapSet.put(head)
+                acc = 
+                    if Enum.member?(before_acc, val_vc_1) or Enum.member?(before_acc, head) do
+                        acc
+                    else
+                        acc |> MapSet.put(val_vc_1) |> MapSet.put(head)
+                    end
+                resolve2(val_vc_1, tail, acc, before_acc)
             else
                 acc =
                     if result == :before do
+                        acc = MapSet.delete(acc, val_vc_1)
+                        before_acc = before_acc |> MapSet.put(val_vc_1)
                         acc |> MapSet.put(head)
+                        resolve2(val_vc_1, tail, acc, before_acc)
                     else
+                        acc = MapSet.delete(acc, head)
+                        before_acc = before_acc |> MapSet.put(head)
                         acc |> MapSet.put(val_vc_1)
+                        resolve2(val_vc_1, tail, acc, before_acc)
                     end
             end
-        resolve2(val_vc_1, tail, acc)
     end
 
-    def resolve2(val_vc_1, [], acc) do
+    def resolve2(val_vc_1, [], acc, before_acc) do
         acc
     end
 end

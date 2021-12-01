@@ -33,8 +33,8 @@ defmodule Dynamo do
     merkle_keys: nil,
     
     #timers
-    min_merkle_timeout: 10_000,
-    max_merkle_timeout: 50_000,
+    min_merkle_timeout: 5_000,
+    max_merkle_timeout: 8_000,
     merkle_timer: nil,
 
     # gossip timer
