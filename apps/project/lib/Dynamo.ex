@@ -23,14 +23,14 @@ defmodule Dynamo do
     # The list of current proceses.
     view: nil,
     # Current leader.
-    store: nil,
+    store: %{},
     clock: %{},
     value_list: [],
-    client_id: nil
-
-    merkle_version = 0
-    merkle_hash: nil
-    merkle_key_set: nil
+    client_id: nil,
+    current_key: nil,
+    merkle_version: 0,
+    merkle_hash: nil,
+    merkle_key_set: nil,
     
     #timers
     min_merkle_timeout: nil,
@@ -42,9 +42,9 @@ defmodule Dynamo do
     gossip_timer: nil,
 
     # Read_qourum
-    R: 1
+    r: 0,
     # write_qourum
-    W: 2
+    w: 0
   )
 
   @doc """
@@ -55,11 +55,13 @@ defmodule Dynamo do
  
   def new_configuration(
         view,
-        store    
+        r,
+        w 
       ) do
     %Dynamo{
       view: view,
-      store: Map.new()
+      r: r,
+      w: w
     }
   end
 
@@ -205,13 +207,22 @@ defmodule Dynamo do
 
   # Insert the new value in store. First check for concurrency 
   def insert_in_store(state, key, value_pair) do
-    existing_values = state.store.get(key)
+    state = 
+    if state.store == %{} or Map.get(state.store,key)==nil do
+      %{state | store: Map.put(state.store, key, [value_pair])}
+    else
+
+    existing_values = Map.get(state.store,key)
+    IO.puts(
+          "checking valuepair for set #{inspect(value_pair)} "
+        )
     {value,current_vc} = value_pair
     state = %{state | clock: combine_vector_clocks(state.clock, current_vc)}
     concurrent_vals = Enum.filter(existing_values, fn {value,vc} -> if compare_vectors(vc, current_vc) == :concurrent do {value,vc}  end end)
     concurrent_vals = [value_pair] ++  concurrent_vals
     %{state | store: Map.put(state.store, key, concurrent_vals)}
-    state = Merkle.build_and_store_chain(state.store, state)
+    #state = Merkle.build_and_store_chain(state.store, state)
+    end
   end
  
   def get_from_store(state, key) do
@@ -228,7 +239,11 @@ defmodule Dynamo do
 
     state.view
     |> Enum.filter(fn pid -> pid != me end)
-    |> Enum.map(fn pid -> send(pid, message) end)
+    |> Enum.map(fn pid -> 
+    IO.puts(
+          "checking sender  #{inspect(me)} receiver #{inspect(pid)} "
+        )
+    send(pid, message) end)
   end
 
   def become_replica(state) do
@@ -261,8 +276,12 @@ def get_recent_value([head1|tail], l2, acc) do
     get_recent_value(tail, l2, acc)
 end
 
-def get_recent_value([], _, acc) do
-  acc
+def get_recent_value([],l2, acc) do
+  acc ++ l2
+end
+
+def get_recent_value(l1,[], acc) do
+  acc ++ l1
 end
 
 def loop1(val1, [head2 | tail2],acc) do
@@ -280,6 +299,9 @@ def loop1(val1,[],acc) do
 end
 
 def comparinglist(l1, l2 ) do
+  IO.puts(
+          "checking lists for replica server at last #{inspect(l1)} and current_key is #{inspect(l2)}" 
+        )
   uniq(get_recent_value(l1, l2, []) ++ get_recent_value(l2, l1, []))
 end
 
@@ -299,19 +321,25 @@ end
       {sender,{:get,key}} ->
         state = %{state | client_id: sender}
         state = %{state | current_key: key}
-        state = %{state | value_list: [] ++ get_from_store(state,key)}
+        state = %{state | value_list: []}
+        IO.puts(
+          "checking key for server #{inspect(key)} "
+        )
         msg = ReplicationRequest.new(key,nil,:get)
         broadcast_to_others(state, msg)
+        msg = ReplicationResponse.new(key,get_from_store(state,key),:get)
+        send(whoami(), msg)
         replica(state,extra_state)
 
       # set request from client
       {sender,{:set,key,value}} ->
-         state = %{state | client_id: sender}    
-        state = insert_in_store(state,key,value)
+        state = %{state | client_id: sender,current_key: key}    
         value_pair = {value,state.clock}
-        insert_in_store(state, key, value_pair)
+        state = insert_in_store(state, key, value_pair)
          msg = ReplicationRequest.new(key,value_pair,:set)
         broadcast_to_others(state,msg)
+        msg = ReplicationResponse.new(key,value_pair,:set)
+        send(whoami(), msg)
         replica(state,extra_state)
 
       # read qourum request
@@ -322,7 +350,8 @@ end
          op: :get
        }} ->
         value_pair = get_from_store(state,key)
-         msg = ReplicationResponse.new(key,value_pair,:get)
+        
+        msg = ReplicationResponse.new(key,value_pair,:get)
         send(sender, msg)
         replica(state, extra_state)
 
@@ -333,8 +362,12 @@ end
          value: value_pair,
          op: :set
        }} ->
+       me = whoami()
+        IO.puts(
+          "checking valuepair for set start in sender #{inspect(me)} replica #{inspect(value_pair)} "
+        )
         state = insert_in_store(state,key,value_pair)
-        msg = ReplicationResponse.new(key,:ok,:set)
+        msg = ReplicationResponse.new(key,nil,:set)
         send(sender, msg)
         replica(state, extra_state)
 
@@ -345,71 +378,54 @@ end
          value: value_pair,
          op: :get
        }} ->
-        
-        if key == state.current_key and extra_state.count < state.R do
-          newvalue_pairs = comparinglist(state.value_list, value_pair)
-          state = %{state | value_list: newvalue_pairs}
+        IO.puts(
+          "checking key for replica server at last #{inspect(key)} and current_key is #{inspect(state.current_key)}" 
+        )
+        if key == state.current_key do
           extra_state = %{extra_state | count: extra_state.count+1}
+          if extra_state.count < state.r do
+            newvalue_pairs = comparinglist(state.value_list, value_pair)
+            state = %{state | value_list: newvalue_pairs}
            replica(state,extra_state)
+          else
+            newvalue_pairs = comparinglist(state.value_list, value_pair)
+            state = %{state | value_list: newvalue_pairs}
+            send(state.client_id, state.value_list)
+            state = %{state | current_key: nil, value_list: nil, client_id: nil}
+            extra_state = %{extra_state | count: 0}
+            replica(state,extra_state)
+          end
         end
 
-        if key == state.current_key and extra_state.count == state.R do
-          newvalue_pairs = comparinglist(state.value_list, value_pair)
-          state = %{state | value_list: newvalue_pairs}
-          send(state.client_id, state.value_list)
-           state = %{state | current_key: nil, value_list: nil, client_id: nil}
-           extra_state = %{extra_state | count: 0}
-           replica(state,extra_state)
-        end
-        replica(state,extra_state)
-        
       {sender,
        %ReplicationResponse{
          key: key,
-         value: :ok,
+         value: value,
          op: :set
        }} ->
-        len = floor(Enum.count(state.view) / 2)
-        if key == state.current_key and extra_state.count<state.W do
+       me = whoami()
+        IO.puts(
+          "received response for for set start #{inspect(me)} replica #{inspect(sender)} "
+        )
+        IO.puts(
+          "inspecting key #{inspect(key)} and stored key #{inspect(state.current_key)} "
+        )
+        if key == state.current_key and extra_state.count<state.w do
+           IO.puts(
+          "entered here "
+        )
           extra_state = %{extra_state | count: extra_state.count+1}
           replica(state,extra_state)
         end
 
-        if key==state.current_key and extra_state.count==state.W do
+        if key==state.current_key and extra_state.count==state.w do
           send(state.client_id,:ok)
           state = %{state | current_key: nil,client_id: nil}
           extra_state = %{extra_state | count: 0}
           replica(state,extra_state)
         end
         replica(state,extra_state)
-
-      # Merkle Synchronization req
-      {sender,
-        %MerkleSynchroRequest{
-          version: ver,
-          merkle_chain: chain
-          match_entries: entries
-      }} -> 
-        # request sent first time
-        state = 
-          if entries == [] do
-            matched_hash = Merkle.comapare_two_chains(state.merkle_hash, chain)
-            state = 
-              if List.starts_with?(matched_hash, chain) do
-                send(sender, MerkleSynchroResponse.new(ver, matched_hash, True))
-                state
-              else
-                send(sender, MerkleSynchroResponse.new(ver, matched_hash, False))
-                state
-              end
-          else
-            # request with entries
-            state = Merkle.merge_and_resolve_kv(entries, state.store, state)
-            state = Merkle.build_and_store_chain(state.store, state)
-          end
-        replica(state, extra_state)
-
-      # Merkle synchronization response
+         # Merkle synchronization response
       {sender,
         %MerkleSynchroResponse{
           version: ver
@@ -439,7 +455,7 @@ end
           send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hash, []))
         end
         state = reset_merkle_timer(state)
-        replica(state, extra_state)   
-    end
+        replica(state, extra_state) 
+      end
   end
 end
