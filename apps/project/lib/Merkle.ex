@@ -1,11 +1,11 @@
-defmodule MerkleChain do
+defmodule Merkle do
     def build_and_store_chain(state, kv) do
         key_list = Map.keys(kv)
         sorted_keys = Enum.sort(key_list)
         state = Map.put(state, :merkle_key_set, sorted_keys)
         state = Map.put(state, :merkle_version, state.merkle_version + 1)
         new_chain = build_chain(sorted_keys, kv, [])
-        Map.put(statem, :merkle_hash, new_chain)
+        Map.put(state, :merkle_hash, new_chain)
     end
 
     def build_chain([head|tail], kv, acc) do
@@ -114,10 +114,10 @@ defmodule MerkleChain do
                         acc |> MapSet.put(val_vc_1)
                     end
             end
-        resolve2(vc_map1, tail, kv, acc)
+        resolve2(val_vc_1, tail, acc)
     end
 
-    def resolve2(vc_map1, [], acc) do
+    def resolve2(val_vc_1, [], acc) do
         acc
     end
 end

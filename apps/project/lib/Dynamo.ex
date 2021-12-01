@@ -29,16 +29,16 @@ defmodule Dynamo do
     client_id: nil,
     current_key: nil,
     merkle_version: 0,
-    merkle_hash: nil,
-    merkle_key_set: nil,
+    merkle_hashchain: nil,
+    merkle_keys: nil,
     
     #timers
-    min_merkle_timeout: nil,
-    max_merkle_timeout: nil,
+    min_merkle_timeout: 10_000,
+    max_merkle_timeout: 50_000,
     merkle_timer: nil,
 
-    # Time between heartbeats from the leader.
-    gossip_timeout: nil,
+    # gossip timer
+    gossip_timeout: 2_000,
     gossip_timer: nil,
 
     # Read_qourum
@@ -336,7 +336,7 @@ end
         state = %{state | client_id: sender,current_key: key}    
         value_pair = {value,state.clock}
         state = insert_in_store(state, key, value_pair)
-         msg = ReplicationRequest.new(key,value_pair,:set)
+        msg = ReplicationRequest.new(key,value_pair,:set)
         broadcast_to_others(state,msg)
         msg = ReplicationResponse.new(key,value_pair,:set)
         send(whoami(), msg)
@@ -425,23 +425,50 @@ end
           replica(state,extra_state)
         end
         replica(state,extra_state)
-         # Merkle synchronization response
+
+      # Merkle Synchronization req
+      {sender,
+        %MerkleSynchroRequest{
+          version: ver,
+          merkle_chain: chain,
+          match_entries: entries
+      }} -> 
+        # request sent first time
+        state = 
+          if entries == [] do
+            matched_hash = Merkle.compare_two_chains(state.merkle_hashchain, chain)
+            state = 
+              if List.starts_with?(matched_hash, chain) do
+                send(sender, MerkleSynchroResponse.new(ver, matched_hash, True))
+                state
+              else
+                send(sender, MerkleSynchroResponse.new(ver, matched_hash, False))
+                state
+              end
+          else
+            # request with entries
+            state = Merkle.merge_and_resolve_kv(entries, state.store, state)
+            state = Merkle.build_and_store_chain(state.store, state)
+          end
+        replica(state, extra_state)
+         
+      # Merkle synchronization response
       {sender,
         %MerkleSynchroResponse{
-          version: ver
-          matched_hashes: hash
+          version: ver,
+          matched_hashes: hash,
           success: succ
       }} -> 
         # working on same merkle Tree
         if ver == state.merkle_version do
           if not succ do
             #synchronization needed
-            entries = Merkle.get_unmatched_elements(state.store, hash, state.merkle_hash, state.merkle_key_set)
-            send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hash, entries))
+            entries = Merkle.get_unmatched_elements(state.store, hash, state.merkle_hashchain, state.merkle_keys)
+            send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hashchain, entries))
           end
         else
           # version has changed. This response no longer valid. send request with new chain
-          send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hash, []))
+          send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hashchain, []))
         end
         replica(state, extra_state)
 
@@ -452,7 +479,7 @@ end
           # choose randomly one process
           sender = state.view |> Enum.filter(fn pid -> pid != whoami() end) |> Enum.random()
           # send request
-          send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hash, []))
+          send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hashchain, []))
         end
         state = reset_merkle_timer(state)
         replica(state, extra_state) 

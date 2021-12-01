@@ -81,12 +81,12 @@ end
 defmodule MerkleSynchroRequest do
   alias __MODULE__
   defstruct(
-    version: nil
-    merkle_chain: nil
+    version: nil,
+    merkle_chain: nil,
     match_entries: nil
   )
 
-  def new(chain, entries) do
+  def new(ver, chain, entries) do
     %MerkleSynchroRequest{version: ver, merkle_chain: chain, match_entries: entries}
   end
 end
@@ -94,8 +94,8 @@ end
 defmodule MerkleSynchroResponse do
   alias __MODULE__
   defstruct(
-    version: nil
-    matched_hashes: nil
+    version: nil,
+    matched_hashes: nil,
     success: nil
   )
 
