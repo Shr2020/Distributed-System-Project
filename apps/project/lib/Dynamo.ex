@@ -23,6 +23,7 @@ defmodule Dynamo do
     # The list of current proceses.
     view: nil,
     # Current leader.
+    
     store: %{},
     clock: %{},
     value_list: [],
@@ -55,11 +56,13 @@ defmodule Dynamo do
  
   def new_configuration(
         view,
+       
         r,
         w 
       ) do
     %Dynamo{
       view: view,
+      
       r: r,
       w: w
     }
@@ -213,13 +216,10 @@ defmodule Dynamo do
     else
 
     existing_values = Map.get(state.store,key)
-    IO.puts(
-          "checking valuepair for set #{inspect(value_pair)} "
-        )
-    {value,current_vc} = value_pair
+    
     state = %{state | clock: combine_vector_clocks(state.clock,value_pair.vc)}
     concurrent_vals = Enum.filter(existing_values, fn x -> if compare_vectors(x.vc, value_pair.vc) == :concurrent do x  end end)
-    concurrent_vals = [value_pair] ++  concurrent_vals
+    concurrent_vals = uniq([value_pair] ++  concurrent_vals)
     %{state | store: Map.put(state.store, key, concurrent_vals)}
     #state = Merkle.build_and_store_chain(state.store, state)
     end
@@ -240,9 +240,7 @@ defmodule Dynamo do
     state.view
     |> Enum.filter(fn pid -> pid != me end)
     |> Enum.map(fn pid -> 
-    IO.puts(
-          "checking sender  #{inspect(me)} receiver #{inspect(pid)} "
-        )
+    
     send(pid, message) end)
   end
 
@@ -295,9 +293,7 @@ def loop1(val1,[],acc) do
 end
 
 def comparinglist(l1, l2 ) do
-  IO.puts(
-          "checking lists for replica server at last #{inspect(get_recent_value(l1, l2, []))} and current_key is #{inspect(get_recent_value(l2, l1, []))}" 
-        )
+  
   uniq(get_recent_value(l1, l2, []) ++ get_recent_value(l2, l1, []))
 end
 
@@ -315,11 +311,12 @@ end
     receive do
       # get request from client
       {sender,{:get,key}} ->
+
         state = %{state | client_id: sender}
         state = %{state | current_key: key}
         state = %{state | value_list: []}
-        IO.puts(
-          "checking key for server #{inspect(key)} "
+         IO.puts(
+          "get server is #{inspect(whoami())} #{inspect(key)} "
         )
         msg = ReplicationRequest.new(key,nil,:get)
         broadcast_to_others(state, msg)
@@ -332,6 +329,9 @@ end
         state = update_vector_clock(state)
         state = %{state | client_id: sender,current_key: key}    
         value_pair = Value.new(value,state.clock)
+        IO.puts(
+          "value pair  set server is #{inspect(whoami())} #{inspect(value_pair)} "
+        )
         state = insert_in_store(state, key, value_pair)
         msg = ReplicationRequest.new(key,value_pair,:set)
         broadcast_to_others(state,msg)
@@ -360,9 +360,7 @@ end
          op: :set
        }} ->
        me = whoami()
-        IO.puts(
-          "checking valuepair for set start in sender #{inspect(me)} replica #{inspect(value_pair)} "
-        )
+        
         state = insert_in_store(state,key,value_pair)
         msg = ReplicationResponse.new(key,nil,:set)
         send(sender, msg)
@@ -375,9 +373,7 @@ end
          value: value_pair,
          op: :get
        }} ->
-        IO.puts(
-          "checking key for replica server at last #{inspect(key)} and current_key is #{inspect(state.current_key)}" 
-        )
+        
         if key == state.current_key do
           extra_state = %{extra_state | count: extra_state.count+1}
           if extra_state.count < state.r do
@@ -385,13 +381,10 @@ end
             state = %{state | value_list: newvalue_pairs}
            replica(state,extra_state)
           else
-            IO.puts(
-          "checking lists for server #{inspect(state.value_list)} and value pair is #{inspect(value_pair)}" 
-        )
             newvalue_pairs = comparinglist(state.value_list, value_pair)
             state = %{state | value_list: newvalue_pairs}
             send(state.client_id, state.value_list)
-            state = %{state | current_key: nil, value_list: nil, client_id: nil}
+            state = %{state | current_key: nil, value_list: [], client_id: nil}
             extra_state = %{extra_state | count: 0}
             replica(state,extra_state)
           end
@@ -404,16 +397,9 @@ end
          op: :set
        }} ->
        me = whoami()
-        IO.puts(
-          "received response for for set start #{inspect(me)} replica #{inspect(sender)} "
-        )
-        IO.puts(
-          "inspecting key #{inspect(key)} and stored key #{inspect(state.current_key)} "
-        )
+        
         if key == state.current_key and extra_state.count<state.w do
-           IO.puts(
-          "entered here "
-        )
+           
           extra_state = %{extra_state | count: extra_state.count+1}
           replica(state,extra_state)
         end
@@ -483,6 +469,12 @@ end
         end
         state = reset_merkle_timer(state)
         replica(state, extra_state) 
+    
+      #for debugging
+      {sender,{:set_delay, {pid,time}}} ->
+      
+        state = %{state | delay_time: Map.put(state.delay_time,pid,time)}
+        replica(state, extra_state)
       end
   end
 end
