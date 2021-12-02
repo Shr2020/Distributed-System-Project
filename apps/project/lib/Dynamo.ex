@@ -479,13 +479,6 @@ end
         end
         state = reset_merkle_timer(state)
         replica(state, extra_state) 
-<<<<<<< HEAD
-    
-      #for debugging
-      {sender,{:set_delay, {pid,time}}} ->
-      
-        state = %{state | delay_time: Map.put(state.delay_time,pid,time)}
-=======
 
 
       # Msgs for testing
@@ -495,7 +488,6 @@ end
       # to send merkle stat for hypothesis testing
       {sender, :send_merkle_attempts} ->
         send(sender, state.merkle_stat)
->>>>>>> e6c5856c6719088f0d091e5a946dc1e388cad81d
         replica(state, extra_state)
       end
   end
