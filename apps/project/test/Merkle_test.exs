@@ -84,6 +84,18 @@ defmodule MerkleTest do
     expected = [5, 6]
     assert result == expected
   end
+
+  test "build_and_store_chain" do
+    kv =  %{a: [%Value{val: 3, vc: %{x: 1, y: 1, z: 0}}, %Value{val: 4, vc: %{x: 1, y: 0, z: 1}}], 
+                      b: [%Value{val: 7, vc: %{x: 1, y: 1, z: 1}}], 
+                      c: [%Value{val: 8, vc: %{x: 1, y: 3, z: 1}}], 
+                      d: [%Value{val: 9, vc: %{x: 2, y: 1, z: 1}}]}
+    state = %{store: kv, merkle_keys: [], merkle_version: 0, merkle_hashchain: nil}
+    state = Merkle.build_and_store_chain(state, kv)
+    assert state.merkle_keys == [:a, :b, :c, :d]
+    IO.puts("State: #{inspect(state)}")
+
+  end
 end
 
   

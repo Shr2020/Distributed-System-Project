@@ -2,18 +2,20 @@ defmodule Merkle do
     def build_and_store_chain(state, kv) do
         key_list = Map.keys(kv)
         sorted_keys = Enum.sort(key_list)
-        state = Map.put(state, :merkle_key_set, sorted_keys)
+        state = Map.put(state, :merkle_keys, sorted_keys)
         state = Map.put(state, :merkle_version, state.merkle_version + 1)
         new_chain = build_chain(sorted_keys, kv, [])
-        Map.put(state, :merkle_hash, new_chain)
+        IO.puts("New chain: #{inspect(new_chain)}")
+        Map.put(state, :merkle_hashchain, new_chain)
     end
 
     def build_chain([head|tail], kv, acc) do
         key_hash = Crypto.sha256(head)
-        val_hash = Crypto.sha256(kv.head)
+        val = Map.fetch(kv, head)
+        val_hash = Crypto.sha256(elem(val, 1))
         total_hash = Crypto.sha256(key_hash<>val_hash)
         total_hash_val = Crypto.sha256(total_hash<>Enum.join(acc))
-        acc = [MerkleNode.new(total_hash_val)] ++ acc
+        acc = [total_hash_val] ++ acc
         build_chain(tail, kv, acc)
     end
 
