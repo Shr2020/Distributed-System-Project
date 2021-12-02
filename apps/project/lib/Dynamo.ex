@@ -29,13 +29,15 @@ defmodule Dynamo do
     value_list: [],
     client_id: nil,
     current_key: nil,
+    
+    #merkle
     merkle_version: 0,
     merkle_hashchain: nil,
     merkle_keys: nil,
     
     #timers
-    min_merkle_timeout: 10_000,
-    max_merkle_timeout: 50_000,
+    min_merkle_timeout: 0,
+    max_merkle_timeout: 0,
     merkle_timer: nil,
 
     # gossip timer
@@ -45,7 +47,10 @@ defmodule Dynamo do
     # Read_qourum
     r: 0,
     # write_qourum
-    w: 0
+    w: 0,
+
+    # helpers for testing
+    merkle_stat: %{success: 0, fail: 0}
   )
 
   @doc """
@@ -53,6 +58,7 @@ defmodule Dynamo do
   process should get an appropriately updated versi
   of this state.
   """
+<<<<<<< HEAD
  
   def new_configuration(
         view,
@@ -60,11 +66,16 @@ defmodule Dynamo do
         r,
         w 
       ) do
+=======
+  def new_configuration(view, r, w, min_merkle_tout, max_merkle_tout) do
+>>>>>>> e6c5856c6719088f0d091e5a946dc1e388cad81d
     %Dynamo{
       view: view,
       
       r: r,
-      w: w
+      w: w,
+      min_merkle_timeout: min_merkle_tout,
+      max_merkle_timeout: max_merkle_tout
     }
   end
 
@@ -221,7 +232,7 @@ defmodule Dynamo do
     concurrent_vals = Enum.filter(existing_values, fn x -> if compare_vectors(x.vc, value_pair.vc) == :concurrent do x  end end)
     concurrent_vals = uniq([value_pair] ++  concurrent_vals)
     %{state | store: Map.put(state.store, key, concurrent_vals)}
-    #state = Merkle.build_and_store_chain(state.store, state)
+    state = Merkle.build_and_store_chain(state.store, state)
     end
   end
  
@@ -246,51 +257,52 @@ defmodule Dynamo do
 
   def become_replica(state) do
     me = whoami()
+    state = reset_merkle_timer(state)
     new_clock = Map.put(state.clock,me,0)
        state = %{state | clock: new_clock}
     replica(state,%{version_num: 0,count: 0})
   end
 
-def uniq(list) do
-    uniq(list, MapSet.new())
-end
-
-defp uniq([x | rest], found) do
-  if MapSet.member?(found, x.vc) do
-    uniq(rest, found)
-  else
-    [x | uniq(rest, MapSet.put(found, x.vc))]
+  def uniq(list) do
+      uniq(list, MapSet.new())
   end
-end
 
-defp uniq([], _) do
-  []
-end
+  defp uniq([x | rest], found) do
+    if MapSet.member?(found, x.vc) do
+      uniq(rest, found)
+    else
+      [x | uniq(rest, MapSet.put(found, x.vc))]
+    end
+  end
 
-def get_recent_value([head1|tail], l2, acc) do
+  defp uniq([], _) do
+    []
+  end
 
-    acc = loop1(head1, l2, acc)
-    get_recent_value(tail, l2, acc)
-end
+  def get_recent_value([head1|tail], l2, acc) do
 
-def get_recent_value([],l2, acc) do
-  
-  acc
-end
+      acc = loop1(head1, l2, acc)
+      get_recent_value(tail, l2, acc)
+  end
 
-
-def loop1(head1, [head2 | tail2],acc) do
-  if compare_vectors(head1.vc, head2.vc) != :before do
-    loop1(head1, tail2, acc)
-  else
+  def get_recent_value([],l2, acc) do
+    
     acc
   end
-end
 
-def loop1(val1,[],acc) do
 
-  acc ++ [val1]
-end
+  def loop1(head1, [head2 | tail2],acc) do
+    if compare_vectors(head1.vc, head2.vc) != :before do
+      loop1(head1, tail2, acc)
+    else
+      acc
+    end
+  end
+
+  def loop1(val1,[],acc) do
+
+    acc ++ [val1]
+  end
 
 def comparinglist(l1, l2 ) do
   
@@ -298,14 +310,7 @@ def comparinglist(l1, l2 ) do
 end
 
   @doc """
-  This function implements the state machine for a process
-  that is currently the leader.
-
-  `extra_state` can be used to hold any additional information.
-  HINT: It might be useful to track the number of responses
-  received for each AppendEntry request.
   """
-
   def replica(state,extra_state) do
 
     receive do
@@ -446,16 +451,21 @@ end
           success: succ
       }} -> 
         # working on same merkle Tree
-        if ver == state.merkle_version do
-          if not succ do
-            #synchronization needed
-            entries = Merkle.get_unmatched_elements(state.store, hash, state.merkle_hashchain, state.merkle_keys)
-            send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hashchain, entries))
+        state = 
+          if ver == state.merkle_version do
+            state = Map.put(state, :merkle_stat, Map.put(state.merkle_stat, :success, state.merkle_stat.success + 1))
+            if not succ do
+              #synchronization needed
+              entries = Merkle.get_unmatched_elements(state.store, hash, state.merkle_hashchain, state.merkle_keys)
+              send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hashchain, entries))
+            end
+            state
+          else
+            state = Map.put(state, :merkle_stat, Map.put(state.merkle_stat, :fail, state.merkle_stat.fail + 1))
+            # version has changed. This response no longer valid. send request with new chain
+            send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hashchain, []))
+            state
           end
-        else
-          # version has changed. This response no longer valid. send request with new chain
-          send(sender, MerkleSynchroRequest.new(state.version, state.merkle_hashchain, []))
-        end
         replica(state, extra_state)
 
       # Merkle timeout. Send synchronization request
@@ -469,11 +479,23 @@ end
         end
         state = reset_merkle_timer(state)
         replica(state, extra_state) 
+<<<<<<< HEAD
     
       #for debugging
       {sender,{:set_delay, {pid,time}}} ->
       
         state = %{state | delay_time: Map.put(state.delay_time,pid,time)}
+=======
+
+
+      # Msgs for testing
+      {sender, "kill me"} ->
+        IO.puts("Process: #{inspect(whoami)}  killed.")
+
+      # to send merkle stat for hypothesis testing
+      {sender, :send_merkle_attempts} ->
+        send(sender, state.merkle_stat)
+>>>>>>> e6c5856c6719088f0d091e5a946dc1e388cad81d
         replica(state, extra_state)
       end
   end

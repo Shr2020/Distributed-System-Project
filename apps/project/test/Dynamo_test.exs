@@ -11,7 +11,7 @@ defmodule DynamoTest do
     view = [:a, :b, :c, :d, :e, :f]
     #delay_time = %{a: 0, b: 0, c: 0}
     base_config =
-      Dynamo.new_configuration(view, 1, 1)
+      Dynamo.new_configuration(view, 1, 2, 2_000, 3_000)
 
     spawn(:b, fn -> Dynamo.become_replica(base_config) end)
     spawn(:c, fn -> Dynamo.become_replica(base_config) end)
