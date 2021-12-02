@@ -58,17 +58,7 @@ defmodule Dynamo do
   process should get an appropriately updated versi
   of this state.
   """
-<<<<<<< HEAD
- 
-  def new_configuration(
-        view,
-       
-        r,
-        w 
-      ) do
-=======
   def new_configuration(view, r, w, min_merkle_tout, max_merkle_tout) do
->>>>>>> e6c5856c6719088f0d091e5a946dc1e388cad81d
     %Dynamo{
       view: view,
       
