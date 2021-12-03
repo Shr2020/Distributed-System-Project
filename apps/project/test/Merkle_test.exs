@@ -25,12 +25,12 @@ defmodule MerkleTest do
            "b": [value_b_2], 
            "c": [value_c_1]}
 
-    new_map = Merkle.merge_and_resolve_kv(received, kv, state)
+    state = Merkle.merge_and_resolve_kv(received, kv, state)
     expected_map =  %{a: [%Value{val: 3, vc: %{x: 1, y: 1, z: 0}}, %Value{val: 4, vc: %{x: 1, y: 0, z: 1}}], 
                       b: [%Value{val: 7, vc: %{x: 1, y: 1, z: 1}}], 
                       c: [%Value{val: 8, vc: %{x: 1, y: 3, z: 1}}], 
                       d: [%Value{val: 9, vc: %{x: 2, y: 1, z: 1}}]}
-    assert new_map == expected_map
+    assert state.store == expected_map
   end
 
   test "test get_unmatched_elements" do

@@ -77,7 +77,6 @@ defmodule Merkle do
             end)
         kv_latest = resolve_map(merged_kv, %{})
         state = Map.put(state, :store, kv_latest)
-        kv_latest
     end
 
     def resolve_map(kv, new_kv) do

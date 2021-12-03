@@ -5,7 +5,7 @@ defmodule Crypto do
   """
   @spec sha256(any()) :: String.t()
   def sha256(data) do
-    hash(:erlang.term_to_binary(data), :sha256)
+    hash(:erlang.term_to_binary(data), :md5)
   end
 
   @spec hash(String.t(), atom()) :: String.t()
