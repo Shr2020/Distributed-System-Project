@@ -214,6 +214,7 @@ defmodule Dynamo do
     IO.puts("Here")
     state = 
     if state.store == %{} or Map.get(state.store,key)==nil do
+      state = %{state | clock: combine_vector_clocks(state.clock, value_pair.vc)}
       state = %{state | store: Map.put(state.store, key, [value_pair])}
       state = Merkle.build_and_store_chain(state, state.store)
     else
