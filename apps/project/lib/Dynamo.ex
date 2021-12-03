@@ -383,6 +383,7 @@ end
             replica(state,extra_state)
           end
         end
+        replica(state,extra_state)
 
       {sender,
        %ReplicationResponse{
