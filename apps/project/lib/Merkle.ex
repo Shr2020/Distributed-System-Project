@@ -5,7 +5,7 @@ defmodule Merkle do
         state = Map.put(state, :merkle_keys, sorted_keys)
         state = Map.put(state, :merkle_version, state.merkle_version + 1)
         new_chain = build_chain(sorted_keys, kv, [])
-        IO.puts("New chain: #{inspect(new_chain)}")
+        IO.puts("New chain: #{inspect(new_chain)}\n")
         Map.put(state, :merkle_hashchain, new_chain)
     end
 
@@ -76,6 +76,7 @@ defmodule Merkle do
                 end
             end)
         kv_latest = resolve_map(merged_kv, %{})
+        IO.puts("*********** #{inspect(kv_latest)}\n")
         state = Map.put(state, :store, kv_latest)
     end
 

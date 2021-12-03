@@ -211,7 +211,6 @@ defmodule Dynamo do
 
   # Insert the new value in store. First check for concurrency 
   def insert_in_store(state, key, value_pair) do
-    IO.puts("Here")
     state = 
     if state.store == %{} or Map.get(state.store,key)==nil do
       state = %{state | clock: combine_vector_clocks(state.clock, value_pair.vc)}
@@ -271,13 +270,11 @@ defmodule Dynamo do
   end
 
   def get_recent_value([head1|tail], l2, acc) do
-
       acc = loop1(head1, l2, acc)
       get_recent_value(tail, l2, acc)
   end
 
   def get_recent_value([],l2, acc) do
-    
     acc
   end
 
@@ -291,7 +288,6 @@ defmodule Dynamo do
   end
 
   def loop1(val1,[],acc) do
-
     acc ++ [val1]
   end
 
@@ -341,9 +337,10 @@ end
          value: value_pair,
          op: :get
        }} ->
+        IO.puts("#{inspect(whoami())} received REPLICATION REQUEST request for key #{key} and value: #{inspect(value_pair)} and op: :GET\n")
         value_pair = get_from_store(state,key)
-        
-        msg = ReplicationResponse.new(key,value_pair,:get)
+
+        msg = ReplicationResponse.new(key, value_pair, :get)
         send(sender, msg)
         replica(state, extra_state)
 
@@ -355,8 +352,9 @@ end
          op: :set
        }} ->
        me = whoami()
-        
-        state = insert_in_store(state,key,value_pair)
+        IO.puts("#{inspect(whoami())} received REPLICATION REQUEST request for key #{key} and value: #{inspect(value_pair)} and op: :SET\n")
+        state = insert_in_store(state, key, value_pair)
+        IO.puts("#{inspect(state.store)}\n")
         msg = ReplicationResponse.new(key,nil,:set)
         send(sender, msg)
         replica(state, extra_state)
@@ -369,6 +367,8 @@ end
          op: :get
        }} ->
         
+        IO.puts("#{inspect(whoami())} received REPLICATION RESPONSE request for key #{key} and value: #{inspect(value_pair)} and op: :GET\n")
+
         if key == state.current_key do
           extra_state = %{extra_state | count: extra_state.count+1}
           if extra_state.count < state.r do
@@ -393,9 +393,8 @@ end
          op: :set
        }} ->
        me = whoami()
-        
+        IO.puts("#{inspect(whoami())} received REPLICATION RESPONSE request for key #{key} and value: #{inspect(value)} and op: :SET\n")
         if key == state.current_key and extra_state.count<state.w do
-           
           extra_state = %{extra_state | count: extra_state.count+1}
           replica(state,extra_state)
         end
@@ -417,7 +416,7 @@ end
       }} -> 
         # request sent first time
         IO.puts(
-          "#{inspect(whoami)} received MERKLE REQUEST from #{inspect(sender)}. Contents: version=#{ver} \n merkle_chain=#{inspect(chain)} \n matched_entries=#{inspect(entries)}\n"
+          "#{inspect(whoami)} received MERKLE REQUEST from #{inspect(sender)}. Contents: version=#{ver} matched_entries=#{inspect(entries)}\n"
         )
         state = 
           if entries == [] do
@@ -445,7 +444,7 @@ end
           success: succ
       }} -> 
         IO.puts(
-          "#{inspect(whoami)} received MERKLE RESPONSE from #{inspect(sender)}. Contents: version=#{ver} \n merkle_hashes=#{inspect(hash)} \n success=#{inspect(succ)}\n"
+          "#{inspect(whoami)} received MERKLE RESPONSE from #{inspect(sender)}. Contents: version=#{ver} success=#{inspect(succ)}\n"
         )
         # working on same merkle Tree
         state = 
