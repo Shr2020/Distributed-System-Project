@@ -485,6 +485,11 @@ end
       {sender, :send_merkle_attempts} ->
         send(sender, state.merkle_stat)
         replica(state, extra_state)
+
+      # send kv store for consistency check
+      {sender, :send_kv} ->
+        send(sender, state.store)
+        replica(state, extra_state)
       end
   end
 end

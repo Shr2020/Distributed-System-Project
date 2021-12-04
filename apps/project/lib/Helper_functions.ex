@@ -1,26 +1,26 @@
 defmodule Helper do
 
-    def ckeck_all_kv_consistent([head|tail], [head|tail]) do
-        if ckeck_all_kv_consistent(head, tail) == true do
-            ckeck_all_kv_consistent(tail, tail)
+    def check_all_kv_consistent([head|tail], [head|tail]) do
+        if check_all_kv_consistent(head, tail) == true do
+            check_all_kv_consistent(tail, tail)
         else
             false
         end
     end
 
-    def ckeck_all_kv_consistent([], kv_list) do
+    def check_all_kv_consistent([], kv_list) do
         true
     end
 
-    def ckeck_all_kv_consistent(kv1, [head|tail]) do
+    def check_all_kv_consistent(kv1, [head|tail]) do
         if check_kv_store_consistent(kv1, head) == true do
-            ckeck_all_kv_consistent(kv1, tail)
+            check_all_kv_consistent(kv1, tail)
         else
             false
         end
     end
 
-    def ckeck_all_kv_consistent(kv1, []) do
+    def check_all_kv_consistent(kv1, []) do
         true
     end
 
