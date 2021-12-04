@@ -1,4 +1,29 @@
 defmodule Helper do
+
+    def ckeck_all_kv_consistent([head|tail], [head|tail]) do
+        if ckeck_all_kv_consistent(head, tail) == true do
+            ckeck_all_kv_consistent(tail, tail)
+        else
+            false
+        end
+    end
+
+    def ckeck_all_kv_consistent([], kv_list) do
+        true
+    end
+
+    def ckeck_all_kv_consistent(kv1, [head|tail]) do
+        if check_kv_store_consistent(kv1, head) == true do
+            ckeck_all_kv_consistent(kv1, tail)
+        else
+            false
+        end
+    end
+
+    def ckeck_all_kv_consistent(kv1, []) do
+        true
+    end
+
     def check_kv_store_consistent(kv1, kv2) do
         keys1 = Map.keys(kv1)
         sorted_keys1 = Enum.sort(keys1)
