@@ -26,9 +26,8 @@ defmodule Dynamo do
     
     store: %{},
     clock: %{},
-    value_list: [],
-    client_id: nil,
-    current_key: nil,
+
+    reqnum: 0,
     
     #merkle
     merkle_version: 0,
@@ -228,7 +227,11 @@ defmodule Dynamo do
  
   def get_from_store(state, key) do
     # list of Values will be returned. [%Value{value: a, vc: [..]}, %Value{value: b, vc: [..]}]
-     Map.get(state.store, key)
+     if(Map.get(state.store,key)==nil) do 
+      []
+     else
+      Map.get(state.store, key)
+    end
   end
 
   @doc """
@@ -250,7 +253,7 @@ defmodule Dynamo do
     state = reset_merkle_timer(state)
     new_clock = Map.put(state.clock,me,0)
        state = %{state | clock: new_clock}
-    replica(state,%{version_num: 0,count: 0})
+    replica(state,%{},%{})
   end
 
   def uniq(list) do
@@ -298,14 +301,15 @@ end
 
   @doc """
   """
-  def replica(state, extra_state) do
+  def replica(state,req_state,value_state) do
 
     receive do
       # get request from client
       {sender,{:get, key}} ->
-        state = %{state | client_id: sender}
-        state = %{state | current_key: key}
-        state = %{state | value_list: []}
+       
+        state = %{state | reqnum: state.reqnum+1}
+        req_state = Map.put(req_state,state.reqnum,{0,sender})
+        value_state = Map.put(value_state,state.reqnum,[])
 
         IO.puts("#{inspect(whoami())} received GET request for key: #{inspect(key)}\n")
 
@@ -313,12 +317,13 @@ end
         broadcast_to_others(state, msg)
         msg = ReplicationResponse.new(key, get_from_store(state, key), :get)
         send(whoami(), msg)
-        replica(state, extra_state)
+        replica(state, req_state,value_state)
 
       # set request from client
       {sender,{:set, key, value}} ->
         state = update_vector_clock(state)
-        state = %{state | client_id: sender, current_key: key}    
+        state = %{state | reqnum: state.reqnum+1}
+        req_state = Map.put(req_state,state.reqnum,{0,sender})
         value_pair = Value.new(value, state.clock)
 
         IO.puts("#{inspect(whoami())} received SET request for key #{key} and value: #{inspect(value_pair)}\n")
@@ -328,84 +333,95 @@ end
         broadcast_to_others(state,msg)
         msg = ReplicationResponse.new(key, value_pair, :set)
         send(whoami(), msg)
-        replica(state, extra_state)
+        replica(state, req_state,value_state)
 
       # read qourum request
       {sender,
        %ReplicationRequest{
          key: key,
          value: value_pair,
+         reqnum: reqnum,
          op: :get
        }} ->
         IO.puts("#{inspect(whoami())} received REPLICATION REQUEST request for key #{key} and value: #{inspect(value_pair)} and op: :GET\n")
         value_pair = get_from_store(state,key)
 
-        msg = ReplicationResponse.new(key, value_pair, :get)
+        msg = ReplicationResponse.new(key, value_pair, reqnum,:get)
         send(sender, msg)
-        replica(state, extra_state)
+        replica(state,req_state,value_state)
 
       # write qourum request
       {sender,
        %ReplicationRequest{
          key: key,
          value: value_pair,
+         reqnum: reqnum,
          op: :set
        }} ->
        me = whoami()
         IO.puts("#{inspect(whoami())} received REPLICATION REQUEST request for key #{key} and value: #{inspect(value_pair)} and op: :SET\n")
         state = insert_in_store(state, key, value_pair)
         IO.puts("#{inspect(state.store)}\n")
-        msg = ReplicationResponse.new(key,nil,:set)
+        msg = ReplicationResponse.new(key,nil,reqnum,:set)
         send(sender, msg)
-        replica(state, extra_state)
+        replica(state, req_state,value_state)
 
       # read qourum replies
       {sender,
        %ReplicationResponse{
          key: key,
          value: value_pair,
+         reqnum: index,
          op: :get
        }} ->
         
         IO.puts("#{inspect(whoami())} received REPLICATION RESPONSE request for key #{key} and value: #{inspect(value_pair)} and op: :GET\n")
 
-        if key == state.current_key do
-          extra_state = %{extra_state | count: extra_state.count+1}
-          if extra_state.count < state.r do
-            newvalue_pairs = comparinglist(state.value_list, value_pair)
-            state = %{state | value_list: newvalue_pairs}
-           replica(state,extra_state)
+        if Map.has_key?(req_state,index) do
+          {count,client} = req_state.get(index)
+          req_state = Map.put(req_state,index,{count+1,client})
+          if Map.get(req_state,index) < state.r do
+            newvalue_pairs = comparinglist(Map.get(value_state,index), value_pair)
+            value_state = Map.put(value_state,index,newvalue_pairs)
+           replica(state,req_state,value_state)
           else
-            newvalue_pairs = comparinglist(state.value_list, value_pair)
-            state = %{state | value_list: newvalue_pairs}
-            send(state.client_id, state.value_list)
-            state = %{state | current_key: nil, value_list: [], client_id: nil}
-            extra_state = %{extra_state | count: 0}
-            replica(state,extra_state)
+            newvalue_pairs = comparinglist(Map.get(value_state,index), value_pair)
+            value_state = Map.put(value_state,index,newvalue_pairs)
+
+            values = Enum.map(Map.get(value_state,index), fn x -> x.val end)
+            {count,client} = Map.get(req_state,index)
+            send(client, {:get,key,values})
+            req_state = Map.delete(req_state,index)
+            value_state = Map.delete(value_state,index)
+           
+            replica(state,req_state,value_state)
           end
         end
-        replica(state,extra_state)
+        replica(state,req_state,value_state)
 
       {sender,
        %ReplicationResponse{
          key: key,
          value: value,
+         reqnum: index,
          op: :set
        }} ->
        me = whoami()
         IO.puts("#{inspect(whoami())} received REPLICATION RESPONSE request for key #{key} and value: #{inspect(value)} and op: :SET\n")
-        if key == state.current_key and extra_state.count<state.w do
-          extra_state = %{extra_state | count: extra_state.count+1}
-          replica(state,extra_state)
+        if Map.has_key?(req_state,index) do
+          {count,client} = req_state.get(index)
+          req_state = Map.put(req_state,index,{count+1,client})
+          if Map.get(req_state,index) < state.w do
+            req_state = Map.put(req_state,index,req_state.get(index)+1)
+            replica(state,req_state,value_state)
+          else
+          {count,client} = Map.get(req_state,index)
+          send(client,{:set,key,:ok})
+          req_state = Map.delete(req_state,index)
+          replica(state,req_state,value_state)
+          end
         end
-
-        if key==state.current_key and extra_state.count==state.w do
-          send(state.client_id,:ok)
-          state = %{state | current_key: nil,client_id: nil}
-          extra_state = %{extra_state | count: 0}
-          replica(state,extra_state)
-        end
-        replica(state,extra_state)
+        replica(state,req_state,value_state)
 
       # Merkle Synchronization req
       {sender,
@@ -434,7 +450,7 @@ end
             state = Merkle.merge_and_resolve_kv(entries, state.store, state)
             state = Merkle.build_and_store_chain(state, state.store)
           end
-        replica(state, extra_state)
+        replica(state, req_state,value_state)
          
       # Merkle synchronization response
       {sender,
@@ -462,7 +478,7 @@ end
             send(sender, MerkleSynchroRequest.new(state.merkle_version, state.merkle_hashchain, []))
             state
           end
-        replica(state, extra_state)
+        replica(state, req_state,value_state)
 
       # Merkle timeout. Send synchronization request
       :MT ->
@@ -474,7 +490,7 @@ end
           send(sender, MerkleSynchroRequest.new(state.merkle_version, state.merkle_hashchain, []))
         end
         state = reset_merkle_timer(state)
-        replica(state, extra_state) 
+        replica(state, req_state,value_state) 
 
 
       # Msgs for testing
@@ -484,12 +500,12 @@ end
       # to send merkle stat for hypothesis testing
       {sender, :send_merkle_attempts} ->
         send(sender, state.merkle_stat)
-        replica(state, extra_state)
+        replica(state, req_state,value_state)
 
       # send kv store for consistency check
       {sender, :send_kv} ->
         send(sender, state.store)
-        replica(state, extra_state)
+        replica(state, req_state,value_state)
       end
   end
 end

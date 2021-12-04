@@ -58,11 +58,12 @@ defmodule ReplicationRequest do
   defstruct(
     key: nil,
     value: nil,
+    reqnum: nil,
     op: nil
   )
 
-  def new(k, v, oper) do
-    %ReplicationRequest{key: k, value: v, op: oper}
+  def new(k, v, reqnum,oper) do
+    %ReplicationRequest{key: k, value: v, reqnum: reqnum,op: oper}
   end
 end
 
@@ -71,11 +72,12 @@ defmodule ReplicationResponse do
   defstruct(
     key: nil,
     value: nil,
+    reqnum: nil,
     op: nil
   )
 
-  def new(k, val, oper) do
-    %ReplicationResponse{key: k, value: val, op: oper}
+  def new(k, val, reqnum, oper) do
+    %ReplicationResponse{key: k, value: val,reqnum: reqnum, op: oper}
   end
 end
 defmodule MerkleSynchroRequest do
