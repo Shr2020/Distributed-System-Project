@@ -432,7 +432,7 @@ end
       }} -> 
         # request sent first time
         IO.puts(
-          "#{inspect(whoami)} received MERKLE REQUEST from #{inspect(sender)}. Contents: version=#{ver} matched_entries=#{inspect(entries)}\n"
+          "#{inspect(whoami)} received MERKLE REQUEST from #{inspect(sender)}. Contents: version=#{ver}  matched_entries=#{inspect(entries)}\n"
         )
         state = 
           if entries == [] do

@@ -5,7 +5,7 @@ defmodule Merkle do
         state = Map.put(state, :merkle_keys, sorted_keys)
         state = Map.put(state, :merkle_version, state.merkle_version + 1)
         new_chain = build_chain(sorted_keys, kv, [])
-        IO.puts("New chain: #{inspect(new_chain)}\n")
+        #IO.puts("New chain: #{inspect(new_chain)}\n")
         Map.put(state, :merkle_hashchain, new_chain)
     end
 

@@ -23,7 +23,7 @@ defmodule HypothesisTest do
   #   Emulation.append_fuzzers([Fuzzers.delay(100)])
   #   view = [:a, :b, :c]
   #   base_config =
-  #     Dynamo.new_configuration(view, 1, 2, 3_000, 4_000)
+  #     Dynamo.new_configuration(view, 1, 2, 1_000, 2_000)
 
   #   spawn(:b, fn -> Dynamo.become_replica(base_config) end)
   #   spawn(:c, fn -> Dynamo.become_replica(base_config) end)
@@ -71,7 +71,7 @@ defmodule HypothesisTest do
   #   Emulation.append_fuzzers([Fuzzers.delay(100)])
   #   view = [:a, :b, :c]
   #   base_config =
-  #     Dynamo.new_configuration(view, 1, 2, 3_000, 4_000)
+  #     Dynamo.new_configuration(view, 1, 2, 1_000, 2_000)
 
   #   spawn(:b, fn -> Dynamo.become_replica(base_config) end)
   #   spawn(:c, fn -> Dynamo.become_replica(base_config) end)
@@ -127,14 +127,15 @@ defmodule HypothesisTest do
     test "measure time in obtaining consistency" do
     Emulation.init()
     start = System.monotonic_time()
-    Emulation.append_fuzzers([Fuzzers.delay(100)])
-    view = [:a, :b, :c]
+    Emulation.append_fuzzers([Fuzzers.delay(200)])
+    view = [:a, :b, :c, :d]
     base_config =
       Dynamo.new_configuration(view, 1, 1, 3_000, 4_000)
 
     spawn(:b, fn -> Dynamo.become_replica(base_config) end)
     spawn(:c, fn -> Dynamo.become_replica(base_config) end)
     spawn(:a, fn -> Dynamo.become_replica(base_config) end)
+    spawn(:d, fn -> Dynamo.become_replica(base_config) end)
 
     client =
       spawn(:client, fn ->
@@ -142,12 +143,12 @@ defmodule HypothesisTest do
         {v, client} = Dynamo.Client.set(client, :a, "start", "start_val")
         keys = ["start"]
         keys = 
-          for x <- 1..10 do
+          for x <- 1..5 do
               IO.puts("!!!!!!!!!!!!!!!!!!!!!!!!!!!! #{x}  !!!!!!!!!!!!!!!!!!!!!\n")
               random_server = Enum.random(view)
               IO.puts("selected randomserver #{inspect(random_server)}\n")
               keys =
-                if generate_random_num() < 6 do
+                if generate_random_num() < 10 do
                   key = generate_random_string()
                   val = generate_random_val()
                   {v, client} = Dynamo.Client.set(client, random_server, key, val)
@@ -166,7 +167,7 @@ defmodule HypothesisTest do
     receive do
       {:DOWN, ^handle, _, _, _} -> true
     after
-      120_000 -> assert false
+      30_000 -> assert false
     end
   after
     Emulation.terminate()
@@ -195,6 +196,94 @@ defmodule HypothesisTest do
           measure_time(view, time1, true)
         end
     end
+  end
+
+
+  test "measure staleness" do
+    Emulation.init()
+    
+    Emulation.append_fuzzers([Fuzzers.delay(200)])
+    view = [:a, :b, :c, :d, :e]
+    base_config =
+      Dynamo.new_configuration(view, 1, 1, 3_000, 4_000)
+
+    spawn(:b, fn -> Dynamo.become_replica(base_config) end)
+    spawn(:c, fn -> Dynamo.become_replica(base_config) end)
+    spawn(:a, fn -> Dynamo.become_replica(base_config) end)
+    spawn(:d, fn -> Dynamo.become_replica(base_config) end)
+    spawn(:e, fn -> Dynamo.become_replica(base_config) end)
+
+    client =
+      spawn(:client, fn ->
+        client = Dynamo.Client.new_client(:d)
+        keys = 
+          for x <- 1..5 do
+              IO.puts("!!!!!!!!!!!!!!!!!!!!!!!!!!!! #{x}  !!!!!!!!!!!!!!!!!!!!!\n")
+              random_server = Enum.random(view)
+              IO.puts("selected randomserver #{inspect(random_server)}\n")
+              keys =
+                if generate_random_num() < 5 do
+                  key = generate_random_string()
+                  val = generate_random_val()
+                  send(random_server,{:set, key, value})
+                  #{v, client} = Dynamo.Client.set(client, random_server, key, val)
+                  key
+                else
+                   key = Enum.random(keys)
+                   val = generate_random_val()
+                   send(random_server,{:set, key, value})
+                   key
+                end
+          end
+
+        # send last write
+        key = Enum.random(keys)
+        val = "over"
+        Dynamo.Client.set(client, :a, key, val)
+        measure_staleness(view, start, key, val, true)
+    end)
+
+    handle = Process.monitor(client)
+    # Timeout.
+    receive do
+      {:DOWN, ^handle, _, _, _} -> true
+    after
+      30_000 -> assert false
+    end
+  after
+    Emulation.terminate()
+  end
+
+  def measure_staleness(view, time1, key, val, check_kv) do 
+    start = System.monotonic_time()
+
+    if check_kv == true do
+      view |> Enum.map(fn x -> Dynamo.Client.get(client, random_server, key) end)
+        val_list =
+          view
+          |> Enum.map(fn x ->
+              receive do
+                  {^x, {:get, key, val}} -> val
+              end
+          end)
+        {stale, updated} = check_get_vals(val_list, val, 0, 0)
+        IO.puts("Num of times Stale data obtained: #{stale}" )
+        IO.puts("Num of times Stale data obtained: #{updated}" )
+    end
+  end
+
+  def check_get_vals([head|tail], val, stale, updated) do
+    if head == val do
+      updated = updated + 1
+      check_get_vals(tail, val, stale, updated, time2)
+    else
+      stale = stale + 1
+      check_get_vals(tail, val, stale, updated, time2)
+    end
+  end
+
+  def check_get_vals([], val, stale, updated) do
+    {stale, updated}
   end
 end
 

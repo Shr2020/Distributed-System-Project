@@ -34,21 +34,21 @@ defmodule Dynamo.Client do
 
     send(replica,{:get,key})
 
-    receive do
-      {sender, v} ->
-        {v, client}
-    end
+    # receive do
+    #   {sender, v} ->
+    #     {v, client}
+    # end
   end
 
   def set(client,replica,key,value) do
 
     send(replica,{:set,key,value})
 
-    receive do
+    # receive do
 
-      {sender, :ok} ->
-        {:ok, client}
-    end
+    #   {sender, :ok} ->
+    #     {:ok, client}
+    # end
   end
 end
 
