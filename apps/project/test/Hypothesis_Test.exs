@@ -151,11 +151,11 @@ defmodule HypothesisTest do
                 if generate_random_num() < 10 do
                   key = generate_random_string()
                   val = generate_random_val()
-                  {v, client} = Dynamo.Client.set(client, random_server, key, val)
+                  Dynamo.Client.set(client, random_server, key, val)
                   key
                 else
                    key = Enum.random(keys)
-                   {value, c} = Dynamo.Client.get(client, random_server, key)
+                   Dynamo.Client.get(client, random_server, key)
                    key
                 end
           end
@@ -203,35 +203,37 @@ defmodule HypothesisTest do
     Emulation.init()
     
     Emulation.append_fuzzers([Fuzzers.delay(200)])
-    view = [:a, :b, :c, :d, :e]
+    view = [:a, :b, :c, :e]
     base_config =
       Dynamo.new_configuration(view, 1, 1, 3_000, 4_000)
 
     spawn(:b, fn -> Dynamo.become_replica(base_config) end)
     spawn(:c, fn -> Dynamo.become_replica(base_config) end)
     spawn(:a, fn -> Dynamo.become_replica(base_config) end)
-    spawn(:d, fn -> Dynamo.become_replica(base_config) end)
     spawn(:e, fn -> Dynamo.become_replica(base_config) end)
 
     client =
       spawn(:client, fn ->
         client = Dynamo.Client.new_client(:d)
+        Dynamo.Client.set(client, :a, "start", "start_val")
+        keys = ["start"]
         keys = 
           for x <- 1..5 do
               IO.puts("!!!!!!!!!!!!!!!!!!!!!!!!!!!! #{x}  !!!!!!!!!!!!!!!!!!!!!\n")
               random_server = Enum.random(view)
               IO.puts("selected randomserver #{inspect(random_server)}\n")
-              keys =
+              key =
                 if generate_random_num() < 5 do
+                  # insert new-valur pair
                   key = generate_random_string()
                   val = generate_random_val()
-                  send(random_server,{:set, key, value})
-                  #{v, client} = Dynamo.Client.set(client, random_server, key, val)
+                  Dynamo.Client.set(client, random_server, key, val)
                   key
                 else
+                   #update some existing key 
                    key = Enum.random(keys)
                    val = generate_random_val()
-                   send(random_server,{:set, key, value})
+                   Dynamo.Client.set(client, random_server, key, val)
                    key
                 end
           end
@@ -240,7 +242,7 @@ defmodule HypothesisTest do
         key = Enum.random(keys)
         val = "over"
         Dynamo.Client.set(client, :a, key, val)
-        measure_staleness(view, start, key, val, true)
+        measure_staleness(client, view, key, val)
     end)
 
     handle = Process.monitor(client)
@@ -254,35 +256,33 @@ defmodule HypothesisTest do
     Emulation.terminate()
   end
 
-  def measure_staleness(view, time1, key, val, check_kv) do 
-    start = System.monotonic_time()
+  def measure_staleness(client, view, key, val) do 
 
-    if check_kv == true do
-      view |> Enum.map(fn x -> Dynamo.Client.get(client, random_server, key) end)
-        val_list =
-          view
-          |> Enum.map(fn x ->
-              receive do
-                  {^x, {:get, key, val}} -> val
-              end
-          end)
-        {stale, updated} = check_get_vals(val_list, val, 0, 0)
-        IO.puts("Num of times Stale data obtained: #{stale}" )
-        IO.puts("Num of times Stale data obtained: #{updated}" )
-    end
+    view |> Enum.map(fn x -> Dynamo.Client.get(client, x, key) end)
+      val_list =
+        view
+        |> Enum.map(fn x ->
+            receive do
+                {^x, {:get, key, val}} -> val
+            end
+        end)
+      {stale, updated} = check_stale_vals(val_list, val, 0, 0)
+      IO.puts("Num of times Stale data obtained: #{stale}" )
+      IO.puts("Num of times Updated data obtained: #{updated}" )
+    
   end
 
-  def check_get_vals([head|tail], val, stale, updated) do
+  def check_stale_vals([head|tail], val, stale, updated) do
     if head == val do
       updated = updated + 1
-      check_get_vals(tail, val, stale, updated, time2)
+      check_stale_vals(tail, val, stale, updated)
     else
       stale = stale + 1
-      check_get_vals(tail, val, stale, updated, time2)
+      check_stale_vals(tail, val, stale, updated)
     end
   end
 
-  def check_get_vals([], val, stale, updated) do
+  def check_stale_vals([], val, stale, updated) do
     {stale, updated}
   end
 end
