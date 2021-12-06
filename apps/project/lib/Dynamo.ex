@@ -40,8 +40,15 @@ defmodule Dynamo do
     merkle_timer: nil,
 
     # gossip timer
-    gossip_timeout: 2_000,
+    gossip_timeout: 4_000,
     gossip_timer: nil,
+    roundTrip_timeout: 400,
+    minProtocol_timeout: 800,
+    pr: 0,
+    sub_group_size: 2,
+    roundTrip_timer: nil,
+    minProtocol_timer: nil,
+    ping_neighbour: nil,
 
     # Read_qourum
     r: 0,
@@ -491,6 +498,97 @@ end
         end
         state = reset_merkle_timer(state)
         replica(state, req_state,value_state) 
+
+      :GT ->
+        gt_timer= Emulation.timer(state.gossip_timeout,:GT)
+        state = %{state | gossip_timer: gt_timer}
+        state = Gossip.getRandomNeighbour(state)
+        replica(state,req_state,value_state)
+
+      :RT -> 
+        k_list = Enum.take_random(state.view, state.sub_group_size)
+        broadcast_to_others(k_list, {:pingreq,self(),state.ping_neighbour,state.pr})
+        replica(state,req_state,value_state)
+
+     {sender, {:ack,ping_neighbour,pr}} -> 
+     if pr == state.pr do
+      Emulation.cancel_timer(state.roundTrip_timer)
+      Emulation.cancel_timer(state.minProtocol_timeout)
+       broadcast_to_others(state.view,{ping_neighbour,:alive})
+       if(!Enum.member?(state.view, ping_neighbour)) do
+        state = %{state | view: [state.view | ping_neighbour]}
+        replica(state,req_state,value_state)
+      else
+        replica(state,req_state,value_state)
+        end
+    else
+        replica(state,req_state,value_state)
+    end
+      
+      :MPT -> 
+        broadcast_to_others(state.view,{state.ping_neighbour,:failed})
+        if(Enum.member?(state.view, node)) do
+          state = %{state | view: List.delete(state.view, node)}
+          replica(state,req_state,value_state)
+        else
+          replica(state,req_state,value_state)
+        end
+
+
+      {sender,:joinreq} ->
+        broadcast_to_others(state.view,{sender,:joined})
+        send(sender,{:joinack,state.view})
+        if(!Enum.member?(state.view, sender)) do
+        state = %{state | view: state.view ++ [sender]}
+        replica(state,req_state,value_state)
+      else
+        replica(state,req_state,value_state)
+      end
+      {sender,{node,:joined}} ->
+        if(!Enum.member?(state.view, node)) do
+        state = %{state | view: state.view ++ [node]}
+        replica(state,req_state,value_state)
+      else
+        replica(state,req_state,value_state)
+      end
+
+      {sender,{:joinack,view}} ->
+        state = %{state | view: uniq(state.view ++ view)}
+        replica(state,req_state,value_state)
+
+
+      {sender,{:ping,pr}} -> 
+        send(sender,{:ack,pr})
+        replica(state,req_state,value_state)
+
+      {sender,{node,:alive}} ->
+      if(!Enum.member?(state.view, node)) do
+        state = %{state | view: state.view ++ [node]}
+        replica(state,req_state,value_state)
+      else
+        replica(state,req_state,value_state)
+      end
+
+      {sender,{node,:failed}} ->
+      if(Enum.member?(state.view, node)) do
+        state = %{state | view: List.delete(state.view, node)}
+        replica(state,req_state,value_state)
+      else
+        replica(state,req_state,value_state)
+      end
+
+      {sender, {:pingreq,pinger,ping_neighbour,pr}} ->
+        send(ping_neighbour,{:indirectping,ping_neighbour,pinger,pr})
+        replica(state,req_state,value_state)
+
+      {sender, {:indirectping,ping_neighbour,pinger,pr}} ->
+        send(sender,{:indirectack,ping_neighbour,pinger,pr})
+        replica(state,req_state,value_state)
+
+      
+      {sender, {:indirectack,ping_neighbour,pinger,pr}} ->
+        send(pinger,{:ack,pr})
+        replica(state,req_state,value_state)
 
 
       # Msgs for testing
