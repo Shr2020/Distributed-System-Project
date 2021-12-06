@@ -320,9 +320,9 @@ end
 
         IO.puts("#{inspect(whoami())} received GET request for key: #{inspect(key)}\n")
 
-        msg = ReplicationRequest.new(key, nil, :get)
+        msg = ReplicationRequest.new(key, nil, state.reqnum,:get)
         broadcast_to_others(state, msg)
-        msg = ReplicationResponse.new(key, get_from_store(state, key), :get)
+        msg = ReplicationResponse.new(key, get_from_store(state, key),state.reqnum, :get)
         send(whoami(), msg)
         replica(state, req_state,value_state)
 
@@ -336,9 +336,9 @@ end
         IO.puts("#{inspect(whoami())} received SET request for key #{key} and value: #{inspect(value_pair)}\n")
 
         state = insert_in_store(state, key, value_pair)
-        msg = ReplicationRequest.new(key, value_pair, :set)
+        msg = ReplicationRequest.new(key, value_pair,state.reqnum, :set)
         broadcast_to_others(state,msg)
-        msg = ReplicationResponse.new(key, value_pair, :set)
+        msg = ReplicationResponse.new(key, value_pair,state.reqnum, :set)
         send(whoami(), msg)
         replica(state, req_state,value_state)
 
@@ -385,7 +385,7 @@ end
         IO.puts("#{inspect(whoami())} received REPLICATION RESPONSE request for key #{key} and value: #{inspect(value_pair)} and op: :GET\n")
 
         if Map.has_key?(req_state,index) do
-          {count,client} = req_state.get(index)
+          {count,client} = Map.get(req_state,index)
           req_state = Map.put(req_state,index,{count+1,client})
           if Map.get(req_state,index) < state.r do
             newvalue_pairs = comparinglist(Map.get(value_state,index), value_pair)
@@ -416,7 +416,7 @@ end
        me = whoami()
         IO.puts("#{inspect(whoami())} received REPLICATION RESPONSE request for key #{key} and value: #{inspect(value)} and op: :SET\n")
         if Map.has_key?(req_state,index) do
-          {count,client} = req_state.get(index)
+          {count,client} = Map.get(req_state,index)
           req_state = Map.put(req_state,index,{count+1,client})
           if Map.get(req_state,index) < state.w do
             req_state = Map.put(req_state,index,req_state.get(index)+1)
