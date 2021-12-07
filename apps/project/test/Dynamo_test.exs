@@ -7,7 +7,7 @@ defmodule DynamoTest do
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
 
 
-  test "measure  reads after write probabilty" do
+test "measure  reads after write probabilty" do
     Emulation.init()
     
     Emulation.append_fuzzers([Fuzzers.delay(50)])
@@ -155,12 +155,121 @@ defmodule DynamoTest do
   end
 
 
+
+test "measure_monotonic_read_probability" do
+    Emulation.init()
+    
+    Emulation.append_fuzzers([Fuzzers.delay(20)])
+    view = [:a, :b, :c]
+    base_config =
+      Dynamo.new_configuration(view, 2, 1, 20_000, 30_000)
+
+    spawn(:b, fn -> Dynamo.become_replica(base_config) end)
+    spawn(:c, fn -> Dynamo.become_replica(base_config) end)
+    spawn(:a, fn -> Dynamo.become_replica(base_config) end)
+    #spawn(:d, fn -> Dynamo.become_replica(base_config) end)
+    #spawn(:e, fn -> Dynamo.become_replica(base_config) end)
+    #spawn(:f, fn -> Dynamo.become_replica(base_config) end)
+    #spawn(:g, fn -> Dynamo.become_replica(base_config) end)
+
+    client =
+      spawn(:client, fn ->
+        client = Dynamo.Client.new_client(:client)
+        monotonic_read(view,client)
+         
+    end)
+
+    handle = Process.monitor(client)
+    # Timeout.
+    receive do
+      {:DOWN, ^handle, _, _, _} -> true
+    after
+      120_000 -> assert false
+    end
+  after
+    Emulation.terminate()
+  end
+
+  def monotonic_read(view,client) do
+
+  value_list = write_staleness_reads_probability(view,client,[],10)  
+      for x <- 1..100 do
+              random_server = Enum.random(view)
+              IO.puts("selected randomserver #{inspect(random_server)}\n")
+              send(random_server,{:get,"p"})
+       end
+       IO.puts("start value_list  is  #{inspect(value_list)}\n")
+       monotonic_reads_probability(view,value_list,"p",0,5)
+
+  end
+
+  def monotonic_reads_probability(view,value_list,k,updated,count) do
+
+  receive do
+      {sender,{:get,^k,v}} ->
+      IO.puts("get value is  is  #{inspect(v)}\n")
+        value_list = updated_index_list(value_list,v,[])
+        IO.puts("updated list  is  #{inspect(value_list)}\n")
+        value_read = 
+          if (Enum.count(value_list)==0)  do
+            0 
+          else
+          1
+          end
+        if count > 1 do
+          monotonic_reads_probability(view,value_list,k,updated+value_read,count-1)
+        else
+          IO.puts("probability is  #{inspect(updated/5)}\n")
+        end
+
+        # delay 20ms and N= 7 and R=1 AND W= 1
+          #verifying on 10 writes and 5 reads for different versions
+          # 0.0,0.2,0.6,
+
+          # delay 20ms and N= 5 and R=1 AND W= 1
+          #verifying on 10 writes and 5 reads for different versions
+          #0.6,0.2,0.6,0.2,
+
+          # delay 20ms and N= 3 and R=1 AND W= 1
+          #verifying on 10 writes and 5 reads for different versions
+          # 0.8,0.8,0.8,0.8
+#----------------
+          # delay 20ms and N= 7 and R=2 AND W= 1
+          #verifying on 10 writes and 5 reads for different versions
+          # 0.2,0.8,0.4,0.2,0.4,0.0
+
+          # delay 20ms and N= 5 and R=2 AND W= 1
+          #verifying on 10 writes and 5 reads for different versions
+          # 0.8,0.8,0.6,0.2,0.8,0.8
+
+          # delay 20ms and N= 3 and R=2 AND W= 1
+          #verifying on 10 writes and 5 reads for different versions
+          #  0.8,0.4,0.8,0.8,0.6,0.8
+
+    end
+  end
+
+  def updated_index_list([head1|tail1],v,acc) do
+    if(Enum.member?(v,head1)) do
+      acc ++ [head1]
+    else
+      updated_index_list(tail1,v,acc++[head1])
+    end
+  end
+
+
+  def updated_index_list([], l2,acc) do
+    []
+  end
+
+
+
   def measure_k_staleness(view,client) do
     
       value_list = write_staleness_reads_probability(view,client,[],100)
           for x <- 1..100 do
               random_server = Enum.random(view)
-              IO.puts("selected randomserver #{inspect(random_server)}\n")
+              #IO.puts("selected randomserver #{inspect(random_server)}\n")
               send(random_server,{:get,"p"})
            end
            newlist = splitlist(value_list,8,[])
@@ -171,8 +280,8 @@ def write_staleness_reads_probability(view,client,value_list,count) do
   if count > 0 do
   random_server = Enum.random(view)
   IO.puts("selected randomserver #{inspect(random_server)}\n")
-  val = generate_random_val()
-  Dynamo.Client.set(client, random_server,"p", val)
+  val = "pval#{count}"
+  Dynamo.Client.set(client, random_server,"p",val)
   value_list = [val] ++ value_list
   IO.puts("list is  #{inspect(value_list)}\n")
   write_staleness_reads_probability(view,client,value_list,count-1)
